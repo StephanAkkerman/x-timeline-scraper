@@ -1,0 +1,28 @@
+name: Generate Release Notes
+
+on:
+  workflow_dispatch: # Allows manual trigger of the workflow
+
+jobs:
+  generate_release_notes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest release
+        run: |
+          latest_release=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/releases/latest")
+          echo "latest_release_date=$(echo $latest_release | jq -r .published_at)" >> $GITHUB_ENV
+
+      - name: Fetch closed issues since latest release
+        run: |
+          issues=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/issues?state=closed&since=${{ env.latest_release_date }}&per_page=100")
+          echo "$issues" > closed_issues.json
+
+      - name: Generate release notes
+        run: |
+          release_notes="# Release Notes\n\n"
+          release_notes+="$(jq -r '.[] | select(has("pull_request") | not) | "- #\(.number) \(.title) (closed on \(.closed_at[:10]))"' closed_issues.json)"
+          echo "$release_notes"
