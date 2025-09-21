@@ -29,7 +29,7 @@ This project provides a Python client to scrape tweets from X (formerly Twitter)
 The required packages to run this code can be found in the requirements.txt file. To run this file, execute the following code block after cloning the repository:
 
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
 
 or
