@@ -26,16 +26,10 @@ This project provides a Python client to scrape tweets from X (formerly Twitter)
 ## Installation ⚙️
 <!-- Adjust the link of the second command to your own repo -->
 
-The required packages to run this code can be found in the requirements.txt file. To run this file, execute the following code block after cloning the repository:
+To install the X-Timeline Scraper, you can use pip:
 
 ```bash
-pip install .
-```
-
-or
-
-```bash
-pip install git+https://github.com/StephanAkkerman/x-timeline-scraper.git
+pip install xtimeline
 ```
 
 ## Usage ⌨️
