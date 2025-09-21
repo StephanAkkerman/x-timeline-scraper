@@ -1,10 +1,9 @@
-from __future__ import annotations
-
 import asyncio
 import datetime as dt
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -479,7 +478,7 @@ class XTimelineClient:
             out.append(parsed)
         return out
 
-    async def stream(self, interval_s: float = 5.0) -> Iterable[Tweet]:
+    async def stream(self, interval_s: float = 5.0) -> AsyncIterator[Tweet]:
         """
         Async generator that yields new tweets forever.
 
@@ -519,5 +518,5 @@ async def _example_stream():
             print(tweet.id, tweet.text)
 
 
-if __name__ == "__main__":
-    asyncio.run(_example_stream())
+# if __name__ == "__main__":
+#     asyncio.run(_example_stream())
