@@ -40,7 +40,7 @@ Here's a simple example of how to use the client:
 
 ```python
 import asyncio
-from src.xclient import XTimelineClient
+from xclient import XTimelineClient
 
 async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
@@ -54,7 +54,7 @@ You can also stream new tweets in real-time:
 
 ```python
 import asyncio
-from src.xclient import XTimelineClient
+from xclient import XTimelineClient
 async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
     ) as xc:
