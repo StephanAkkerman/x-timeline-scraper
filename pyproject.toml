@@ -1,10 +1,10 @@
 [project]
 name = "xtimeline"
-version = "0.1.0"
+version = "0.1.1"
 description = "Lightweight X/Twitter timeline client (GraphQL via cURL or auth strategies)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Stephan Akkerman" }]
 keywords = ["twitter", "x", "timeline", "scraping", "aiohttp", "asyncio"]
 dependencies = [
