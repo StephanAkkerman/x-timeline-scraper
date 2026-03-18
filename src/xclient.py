@@ -2,6 +2,7 @@ import asyncio
 import datetime as dt
 import json
 import logging
+import os
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -68,6 +69,70 @@ def unescape_entities(text: str) -> str:
 
 
 _RE_TRAILING_TCO = re.compile(r"(https?://t\.co/\S+)$")
+_SENSITIVE_KEYS = {
+    "authorization",
+    "cookie",
+    "x-csrf-token",
+    "x-guest-token",
+    "x-twitter-auth-type",
+    "ct0",
+    "auth_token",
+}
+
+
+def _mask_secret(value: str, keep: int = 4) -> str:
+    if not value:
+        return ""
+    if len(value) <= keep * 2:
+        return "*" * len(value)
+    return f"{value[:keep]}...{value[-keep:]}"
+
+
+def _redact_mapping(data: dict[str, Any] | None) -> dict[str, Any]:
+    if not data:
+        return {}
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        key_l = str(k).lower()
+        if key_l in _SENSITIVE_KEYS or "token" in key_l or "auth" in key_l:
+            out[str(k)] = _mask_secret(str(v))
+        else:
+            out[str(k)] = v
+    return out
+
+
+def _preview_json(value: Any, limit: int = 1000) -> str:
+    try:
+        txt = json.dumps(value, ensure_ascii=False)
+    except Exception:
+        txt = str(value)
+    return txt[:limit]
+
+
+def _parse_cookie_string(cookie_blob: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in cookie_blob.split(";"):
+        token = part.strip()
+        if not token or "=" not in token:
+            continue
+        k, v = token.split("=", 1)
+        out[k.strip()] = v.strip().strip('"')
+    return out
+
+
+def _extract_cookies_from_curl(raw_curl: str) -> dict[str, str]:
+    collapsed = re.sub(r"\\\s*\n", " ", raw_curl)
+    out: dict[str, str] = {}
+    patterns = [
+        r"(?:^|\s)-b\s+'([^']+)'",
+        r'(?:^|\s)-b\s+"([^"]+)"',
+        r"(?:^|\s)--cookie\s+'([^']+)'",
+        r'(?:^|\s)--cookie\s+"([^"]+)"',
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, collapsed):
+            out.update(_parse_cookie_string(m.group(1)))
+    return out
 
 
 def strip_trailing_tco(text: str) -> str:
@@ -93,12 +158,18 @@ class XTimelineClient:
         curl_path: str = "curl.txt",
         timeout_s: float = 30.0,
         persist_last_id_path: str | None = None,
+        debug_http: bool | None = None,
     ) -> None:
         self.curl_path = Path(curl_path)
         self.timeout_s = timeout_s
         self._session: aiohttp.ClientSession | None = None
         self._req: dict[str, Any] = {}
         self._last_tweet_id: int = 0
+        self.debug_http = (
+            (os.getenv("XCLIENT_DEBUG_HTTP", "").lower() in {"1", "true", "yes"})
+            if debug_http is None
+            else debug_http
+        )
         self.persist_last_id_path = (
             Path(persist_last_id_path) if persist_last_id_path else None
         )
@@ -114,16 +185,94 @@ class XTimelineClient:
             ctx = uncurl.parse_context(
                 "".join(line.strip() for line in raw.splitlines())
             )
+            parsed_cookies = dict(ctx.cookies) if ctx.cookies else {}
+            if not parsed_cookies:
+                parsed_cookies = _extract_cookies_from_curl(raw)
             self._req = {
                 "url": ctx.url,
                 "headers": dict(ctx.headers) if ctx.headers else {},
-                "cookies": dict(ctx.cookies) if ctx.cookies else {},
+                "cookies": parsed_cookies,
                 "json": json.loads(ctx.data) if ctx.data else None,
                 "method": ctx.method.upper(),
             }
+            self._log_request_health_hint()
+            if self.debug_http:
+                logger.warning(
+                    "Loaded cURL: method=%s url=%s headers=%s cookies=%s has_json=%s",
+                    self._req["method"],
+                    self._req["url"],
+                    sorted(_redact_mapping(self._req["headers"]).keys()),
+                    sorted(_redact_mapping(self._req["cookies"]).keys()),
+                    self._req["json"] is not None,
+                )
         except Exception as e:
             logger.critical("Error reading %s: %s", self.curl_path, e)
             self._req = {}
+
+    def _log_request_health_hint(self) -> None:
+        headers = {str(k).lower(): str(v) for k, v in self._req.get("headers", {}).items()}
+        cookies = {str(k).lower(): str(v) for k, v in self._req.get("cookies", {}).items()}
+        warnings: list[str] = []
+
+        if "authorization" not in headers:
+            warnings.append("missing authorization header")
+        if "x-csrf-token" not in headers:
+            warnings.append("missing x-csrf-token header")
+        if "auth_token" not in cookies:
+            warnings.append("missing auth_token cookie")
+        if "ct0" not in cookies:
+            warnings.append("missing ct0 cookie")
+
+        if warnings:
+            logger.warning("Request auth hints: %s", "; ".join(warnings))
+
+    def _log_request_debug(self, *, url: str, method: str, json_payload: Any) -> None:
+        if not self.debug_http:
+            return
+        logger.warning(
+            "HTTP request %s %s\nheaders=%s\ncookies=%s\njson=%s",
+            method,
+            url,
+            _redact_mapping(self._req.get("headers")),
+            _redact_mapping(self._req.get("cookies")),
+            _preview_json(json_payload),
+        )
+
+    def _save_http_error_snapshot(
+        self,
+        *,
+        status: int,
+        url: str,
+        body: str,
+        response_headers: dict[str, str],
+        request_payload: Any,
+    ) -> Path | None:
+        Path("logs").mkdir(parents=True, exist_ok=True)
+        ts = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        out_path = Path("logs") / f"http_error_{status}_{ts}.json"
+        payload = {
+            "timestamp": dt.datetime.now().isoformat(),
+            "status": status,
+            "url": url,
+            "request": {
+                "method": self._req.get("method", "GET"),
+                "headers": _redact_mapping(self._req.get("headers")),
+                "cookies": _redact_mapping(self._req.get("cookies")),
+                "json": request_payload,
+            },
+            "response": {
+                "headers": response_headers,
+                "body": body,
+            },
+        }
+        try:
+            out_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            return out_path
+        except Exception as e:
+            logger.warning("Could not save HTTP error snapshot: %s", e)
+            return None
 
     def _load_last_id(self) -> None:
         """Load last tweet id from disk (if configured)."""
@@ -194,14 +343,30 @@ class XTimelineClient:
         await self._ensure_session()
         assert self._session is not None
         url = self._req["url"]
+        method = self._req.get("method", "GET")
         json_payload = self._req.get("json")
+        self._log_request_health_hint()
+        self._log_request_debug(url=url, method=method, json_payload=json_payload)
 
         try:
-            async with self._session.get(url, json=json_payload) as resp:
+            async with self._session.request(method, url, json=json_payload) as resp:
                 if resp.status >= 400:
                     body = await resp.text()
+                    resp_headers = {k: v for k, v in resp.headers.items()}
+                    snapshot = self._save_http_error_snapshot(
+                        status=resp.status,
+                        url=url,
+                        body=body,
+                        response_headers=resp_headers,
+                        request_payload=json_payload,
+                    )
                     logger.error(
-                        "HTTP %s for %s\nResponse: %s", resp.status, url, body[:2000]
+                        "HTTP %s for %s\nResponse headers: %s\nResponse: %s\nSnapshot: %s",
+                        resp.status,
+                        url,
+                        resp_headers,
+                        body[:2000],
+                        snapshot,
                     )
                     return "" if text else {}
 
@@ -519,4 +684,5 @@ async def _example_stream():
 
 
 # if __name__ == "__main__":
-#     asyncio.run(_example_stream())
+    # asyncio.run(_example_stream())
+    # asyncio.run(_example_once())
