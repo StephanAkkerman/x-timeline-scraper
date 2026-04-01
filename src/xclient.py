@@ -139,6 +139,16 @@ def strip_trailing_tco(text: str) -> str:
     return _RE_TRAILING_TCO.sub("", text)
 
 
+def expand_tco_urls(text: str, url_entities: list[dict]) -> str:
+    """Replace t.co shortlinks with their expanded URLs using entities.urls."""
+    for entry in url_entities:
+        short = entry.get("url", "")
+        expanded = entry.get("expanded_url", "")
+        if short and expanded:
+            text = text.replace(short, expanded)
+    return text
+
+
 class XTimelineClient:
     """
     Minimal client for polling an X/Twitter timeline endpoint described by a cURL.
@@ -528,6 +538,8 @@ class XTimelineClient:
         # text & entities
         legacy = tw.get("legacy", {})
         text = legacy.get("full_text", "")
+        url_entities = legacy.get("entities", {}).get("urls", [])
+        text = expand_tco_urls(text, url_entities)
         text = unescape_entities(strip_trailing_tco(text))
 
         tickers = [t.upper() for t in self._entities(tw, "symbols") if t]
@@ -542,6 +554,19 @@ class XTimelineClient:
         user_screen = self._user_field(tw, "screen_name")
         user_img = self._user_field(tw, "profile_image_url_https")
         url = self._tweet_url(tid)
+
+        # engagement metrics
+        raw_created_at = legacy.get("created_at", "")
+        try:
+            created_at = dt.datetime.strptime(
+                raw_created_at, "%a %b %d %H:%M:%S +0000 %Y"
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, TypeError):
+            created_at = raw_created_at
+        likes = int(legacy.get("favorite_count", 0) or 0)
+        retweets = int(legacy.get("retweet_count", 0) or 0)
+        replies = int(legacy.get("reply_count", 0) or 0)
+        views = int(tw.get("views", {}).get("count", 0) or 0)
 
         # media
         media_items, media_types = self._collect_media(tw)
@@ -615,6 +640,11 @@ class XTimelineClient:
             hashtags=sorted(set(hashtags)),
             title=title,
             media_types=[m.type for m in uniq_media],
+            created_at=created_at,
+            likes=likes,
+            retweets=retweets,
+            replies=replies,
+            views=views,
         )
 
     # ---------- public APIs ----------

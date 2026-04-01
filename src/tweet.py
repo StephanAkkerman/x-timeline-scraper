@@ -54,6 +54,11 @@ class Tweet:
     hashtags: list[str]
     title: str
     media_types: list[str]
+    created_at: str = ""
+    likes: int = 0
+    retweets: int = 0
+    replies: int = 0
+    views: int = 0
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict safe for JSON."""

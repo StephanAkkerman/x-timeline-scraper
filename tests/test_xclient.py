@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from xclient import XTimelineClient
+from xclient import XTimelineClient, expand_tco_urls
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,6 +128,22 @@ TWEET_WITH_MEDIA: dict = {
                 }
             ]
         },
+    },
+}
+
+TWEET_WITH_METRICS: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039000000000000003",
+    "core": _wrap_user("Someone", "someone"),
+    "views": {"count": "24248", "state": "Enabled"},
+    "legacy": {
+        "id_str": "2039000000000000003",
+        "full_text": "Some tweet",
+        "created_at": "Wed Apr 01 19:15:49 +0000 2026",
+        "favorite_count": 120,
+        "retweet_count": 45,
+        "reply_count": 10,
+        "entities": {"hashtags": [], "symbols": []},
     },
 }
 
@@ -296,6 +312,100 @@ class TestMedia:
 # ---------------------------------------------------------------------------
 # Tickers and hashtags
 # ---------------------------------------------------------------------------
+
+class TestMetrics:
+    def test_created_at_parsed_to_iso(self, client):
+        t = _parse(client, TWEET_WITH_METRICS)
+        assert t.created_at == "2026-04-01T19:15:49Z"
+
+    def test_likes(self, client):
+        t = _parse(client, TWEET_WITH_METRICS)
+        assert t.likes == 120
+
+    def test_retweets(self, client):
+        t = _parse(client, TWEET_WITH_METRICS)
+        assert t.retweets == 45
+
+    def test_replies(self, client):
+        t = _parse(client, TWEET_WITH_METRICS)
+        assert t.replies == 10
+
+    def test_views(self, client):
+        t = _parse(client, TWEET_WITH_METRICS)
+        assert t.views == 24248
+
+    def test_missing_metrics_default_to_zero(self, client):
+        t = _parse(client, PLAIN_TWEET)
+        assert t.likes == 0
+        assert t.retweets == 0
+        assert t.views == 0
+
+    def test_missing_created_at_defaults_to_empty(self, client):
+        t = _parse(client, PLAIN_TWEET)
+        assert t.created_at == ""
+
+
+TWEET_WITH_URL: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039000000000000004",
+    "core": _wrap_user("FlappyBert", "flappybert"),
+    "legacy": {
+        "id_str": "2039000000000000004",
+        "full_text": "Play now 👉 https://t.co/tOjx6u4o0o",
+        "entities": {
+            "hashtags": [],
+            "symbols": [],
+            "urls": [
+                {
+                    "url": "https://t.co/tOjx6u4o0o",
+                    "expanded_url": "http://t.me/FlappyBertBot",
+                    "display_url": "t.me/FlappyBertBot",
+                }
+            ],
+        },
+    },
+}
+
+TWEET_WITH_MEDIA_URL: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039000000000000005",
+    "core": _wrap_user("Someone", "someone"),
+    "legacy": {
+        "id_str": "2039000000000000005",
+        "full_text": "Check this out https://t.co/medialink",
+        # media t.co links are NOT in entities.urls — only in entities.media
+        "entities": {"hashtags": [], "symbols": [], "urls": []},
+        "extended_entities": {
+            "media": [
+                {"media_url_https": "https://pbs.twimg.com/media/photo.jpg", "type": "photo"}
+            ]
+        },
+    },
+}
+
+
+class TestUrlExpansion:
+    def test_tco_replaced_with_expanded(self, client):
+        t = _parse(client, TWEET_WITH_URL)
+        assert "http://t.me/FlappyBertBot" in t.text
+        assert "t.co" not in t.text
+
+    def test_media_tco_still_stripped(self, client):
+        # media t.co has no entities.urls entry, so strip_trailing_tco removes it
+        t = _parse(client, TWEET_WITH_MEDIA_URL)
+        assert "t.co" not in t.text
+
+    def test_expand_tco_urls_replaces_all_occurrences(self):
+        entities = [{"url": "https://t.co/abc", "expanded_url": "https://example.com"}]
+        result = expand_tco_urls("see https://t.co/abc and https://t.co/abc", entities)
+        assert result == "see https://example.com and https://example.com"
+
+    def test_expand_tco_urls_ignores_missing_fields(self):
+        entities = [{"url": "", "expanded_url": "https://example.com"}, {"url": "https://t.co/abc"}]
+        # should not raise, text unchanged for invalid entries
+        result = expand_tco_urls("https://t.co/abc", entities)
+        assert result == "https://t.co/abc"
+
 
 class TestEntities:
     def test_ticker_uppercased(self, client):
