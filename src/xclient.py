@@ -439,13 +439,19 @@ class XTimelineClient:
         )
 
     def _user_field(self, tweet: dict, key: str) -> str:
-        return (
+        result = (
             tweet.get("core", {})
             .get("user_results", {})
             .get("result", {})
-            .get("legacy", {})
-            .get(key, "")
         )
+        # New API shape: name/screen_name live in result.core; image in result.avatar
+        if key in ("name", "screen_name", "created_at"):
+            value = result.get("core", {}).get(key, "")
+        elif key == "profile_image_url_https":
+            value = result.get("avatar", {}).get("image_url", "")
+        else:
+            value = result.get("legacy", {}).get(key, "")
+        return value
 
     def _entities(self, tweet: dict, key: str) -> list[str]:
         legacy = tweet.get("legacy", {})
@@ -631,6 +637,15 @@ class XTimelineClient:
         if not isinstance(payload, dict) or not payload:
             return []
 
+        if self.debug_http:
+            Path("logs").mkdir(parents=True, exist_ok=True)
+            ts = dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            dump_path = Path("logs") / f"raw_payload_{ts}.json"
+            dump_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            logger.warning("Raw payload saved to %s", dump_path)
+
         out: list[Tweet] = []
         seen: set[int] = set()
         for tw in self._iter_entry_tweets(self._get_entries(payload)):
@@ -672,7 +687,7 @@ async def _example_once():
     ) as xc:
         tweets = await xc.fetch_tweets(update_last_id=False)
         for t in tweets:
-            print(t.to_markdown())
+            print(t)
 
 
 async def _example_stream():
@@ -683,6 +698,8 @@ async def _example_stream():
             print(tweet.id, tweet.text)
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
     # asyncio.run(_example_stream())
-    # asyncio.run(_example_once())
+    # Set os env XCLIENT_DEBUG_HTTP
+    # os.environ["XCLIENT_DEBUG_HTTP"] = "1"
+    asyncio.run(_example_once())
