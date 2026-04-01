@@ -384,6 +384,46 @@ TWEET_WITH_MEDIA_URL: dict = {
 }
 
 
+LONG_TWEET: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039000000000000006",
+    "core": _wrap_user("Trader", "trader"),
+    "note_tweet": {
+        "is_expandable": True,
+        "note_tweet_results": {
+            "result": {
+                "text": "Full long text that goes well beyond 280 chars. " * 10,
+                "entity_set": {
+                    "symbols": [{"text": "BTC", "indices": [0, 4]}],
+                    "hashtags": [{"text": "Trading", "indices": [5, 13]}],
+                    "urls": [],
+                },
+            }
+        },
+    },
+    "legacy": {
+        "id_str": "2039000000000000006",
+        "full_text": "Full long text that goes well beyond 280 chars. Full long text t…",
+        "entities": {"hashtags": [], "symbols": [], "urls": []},
+    },
+}
+
+
+class TestLongTweet:
+    def test_full_text_used_over_truncated_legacy(self, client):
+        t = _parse(client, LONG_TWEET)
+        assert not t.text.endswith("…")
+        assert len(t.text) > 280
+
+    def test_tickers_from_note_entity_set(self, client):
+        t = _parse(client, LONG_TWEET)
+        assert "BTC" in t.tickers
+
+    def test_hashtags_from_note_entity_set(self, client):
+        t = _parse(client, LONG_TWEET)
+        assert "TRADING" in t.hashtags
+
+
 class TestUrlExpansion:
     def test_tco_replaced_with_expanded(self, client):
         t = _parse(client, TWEET_WITH_URL)

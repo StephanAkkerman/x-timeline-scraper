@@ -537,16 +537,30 @@ class XTimelineClient:
 
         # text & entities
         legacy = tw.get("legacy", {})
-        text = legacy.get("full_text", "")
-        url_entities = legacy.get("entities", {}).get("urls", [])
+
+        # Long-form tweets (Twitter Premium) store full text in note_tweet;
+        # legacy.full_text is only a truncated preview.
+        note = get_in(tw, ["note_tweet", "note_tweet_results", "result"])
+        if note:
+            text = note.get("text", legacy.get("full_text", ""))
+            entities_src = note.get("entity_set", {})
+        else:
+            text = legacy.get("full_text", "")
+            entities_src = legacy.get("entities", {})
+
+        url_entities = entities_src.get("urls", [])
         text = expand_tco_urls(text, url_entities)
         text = unescape_entities(strip_trailing_tco(text))
 
-        tickers = [t.upper() for t in self._entities(tw, "symbols") if t]
+        tickers = [
+            e.get("text", "").upper()
+            for e in entities_src.get("symbols", [])
+            if isinstance(e, dict) and e.get("text")
+        ]
         hashtags = [
-            h.upper()
-            for h in self._entities(tw, "hashtags")
-            if h and h.upper() != "CRYPTO"
+            e.get("text", "").upper()
+            for e in entities_src.get("hashtags", [])
+            if isinstance(e, dict) and e.get("text") and e["text"].upper() != "CRYPTO"
         ]
 
         # user info
@@ -728,8 +742,8 @@ async def _example_stream():
             print(tweet.id, tweet.text)
 
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
     # asyncio.run(_example_stream())
     # Set os env XCLIENT_DEBUG_HTTP
     # os.environ["XCLIENT_DEBUG_HTTP"] = "1"
-    asyncio.run(_example_once())
+    # asyncio.run(_example_once())
