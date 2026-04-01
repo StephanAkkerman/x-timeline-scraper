@@ -1,14 +1,14 @@
 [project]
 name = "xtimeline"
-version = "0.1.1"
+version = "0.1.2"
 description = "Lightweight X/Twitter timeline client (GraphQL via cURL or auth strategies)"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Stephan Akkerman" }]
 keywords = ["twitter", "x", "timeline", "scraping", "aiohttp", "asyncio"]
 dependencies = [
-  "aiohttp>=3.12.15",
+  "aiohttp>=3.13.5",
   "uncurl>=0.0.11",
 ]
 
