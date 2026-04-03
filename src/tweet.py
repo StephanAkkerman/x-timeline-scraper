@@ -59,6 +59,7 @@ class Tweet:
     retweets: int = 0
     replies: int = 0
     views: int = 0
+    is_update: bool = False
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict safe for JSON."""

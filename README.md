@@ -36,31 +36,89 @@ pip install xtimeline
 
 To use the X-Timeline Scraper, you need to provide a cURL command that accesses the desired X timeline. The instructions can be found in [curl_example.txt](curl_example.txt). Then, you can use the `XTimelineClient` class to fetch and parse tweets.
 
-Here's a simple example of how to use the client:
+### Fetching tweets once
 
 ```python
 import asyncio
 from xclient import XTimelineClient
 
-async with XTimelineClient(
-        "curl.txt", persist_last_id_path="state/last_id.txt"
-    ) as xc:
-        tweets = await xc.fetch_tweets(update_last_id=False)
+async def main():
+    async with XTimelineClient("curl.txt") as xc:
+        tweets = await xc.fetch_tweets()
         for t in tweets:
             print(t.to_markdown())
+
+asyncio.run(main())
 ```
 
-You can also stream new tweets in real-time:
+### Streaming new tweets
 
 ```python
 import asyncio
 from xclient import XTimelineClient
-async with XTimelineClient(
+
+async def main():
+    async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
     ) as xc:
         async for t in xc.stream(interval_s=5.0):
             print(t.to_markdown())
+
+asyncio.run(main())
 ```
+
+### Fetch modes
+
+Both `fetch_tweets()` and `stream()` accept a `mode` parameter that controls which tweets are returned:
+
+| Mode | Behaviour |
+|---|---|
+| `"new_only"` (default) | Only returns tweets newer than the last-seen cursor. The cursor advances so the same tweet is never emitted twice. |
+| `"all"` | Returns every tweet in each response. Nothing is filtered. Useful when your own store (e.g. a SQLite database) handles deduplication. |
+| `"with_updates"` | Returns new tweets **and** re-emits previously seen tweets whenever their metrics change (likes, retweets, views). Re-emitted tweets have `is_update=True`. |
+
+```python
+# Hand all deduplication to your own store
+async for t in xc.stream(mode="all"):
+    upsert_to_db(t)
+
+# Only new tweets, cursor persisted across restarts
+async with XTimelineClient(
+    "curl.txt", persist_last_id_path="state/last_id.txt"
+) as xc:
+    async for t in xc.stream(mode="new_only"):
+        process(t)
+
+# New tweets + engagement updates
+async for t in xc.stream(mode="with_updates"):
+    if t.is_update:
+        update_metrics_in_db(t)
+    else:
+        insert_new_tweet(t)
+```
+
+### Tweet fields
+
+Each `Tweet` object contains:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `int` | Tweet ID |
+| `text` | `str` | Full text, HTML entities unescaped, t.co links expanded, long-form tweets supported |
+| `user_name` | `str` | Display name |
+| `user_screen_name` | `str` | @handle (without @) |
+| `user_img` | `str` | Profile image URL |
+| `url` | `str` | Canonical tweet URL |
+| `created_at` | `str` | Post time in ISO 8601 format (`2026-04-01T19:15:49Z`) |
+| `likes` | `int` | Like count |
+| `retweets` | `int` | Retweet count |
+| `replies` | `int` | Reply count |
+| `views` | `int` | View count |
+| `media` | `list[MediaItem]` | Attached photos/videos |
+| `tickers` | `list[str]` | Uppercased `$TICKER` symbols |
+| `hashtags` | `list[str]` | Uppercased hashtags |
+| `title` | `str` | Human-readable summary, e.g. `"TraderSZ retweeted Jelle"` |
+| `is_update` | `bool` | `True` if this tweet was seen in a previous fetch this session |
 
 ## Citation ✍️
 <!-- Be sure to adjust everything here so it matches your name and repo -->

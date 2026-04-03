@@ -6,7 +6,9 @@ import os
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
+
+FetchMode = Literal["all", "new_only", "with_updates"]
 
 import aiohttp
 import uncurl
@@ -175,6 +177,7 @@ class XTimelineClient:
         self._session: aiohttp.ClientSession | None = None
         self._req: dict[str, Any] = {}
         self._last_tweet_id: int = 0
+        self._seen_ids: set[int] = set()
         self.debug_http = (
             (os.getenv("XCLIENT_DEBUG_HTTP", "").lower() in {"1", "true", "yes"})
             if debug_http is None
@@ -501,9 +504,7 @@ class XTimelineClient:
     def _tweet_url(self, tweet_id: int) -> str:
         return f"https://twitter.com/user/status/{tweet_id}"
 
-    def _parse_single_tweet(
-        self, tw: dict, *, allow_update_last_id: bool
-    ) -> Tweet | None:
+    def _parse_single_tweet(self, tw: dict) -> Tweet | None:
         """
         Parse a normalized Tweet GraphQL node into a Tweet object.
 
@@ -511,13 +512,11 @@ class XTimelineClient:
         ----------
         tw : dict
             GraphQL 'Tweet' node (already normalized).
-        allow_update_last_id : bool
-            If True, update last seen id and skip older/equal.
 
         Returns
         -------
         Tweet | None
-            Parsed Tweet or None if filtered/invalid.
+            Parsed Tweet or None if invalid.
         """
         # Prefer legacy.id_str; fallback to rest_id
         try:
@@ -527,13 +526,6 @@ class XTimelineClient:
         if tid <= 0:
             self._save_errored_tweet(tw, "Missing tweet id")
             return None
-
-        # last-id gate
-        if allow_update_last_id:
-            if tid <= self._last_tweet_id:
-                return None
-            self._last_tweet_id = tid
-            self._store_last_id()
 
         # text & entities
         legacy = tw.get("legacy", {})
@@ -605,7 +597,7 @@ class XTimelineClient:
             if not isinstance(inner, dict):
                 return None
             # don't update last_id for nested
-            return self._parse_single_tweet(inner, allow_update_last_id=False)
+            return self._parse_single_tweet(inner)
 
         nested: Tweet | None = None
         if quoted:
@@ -663,19 +655,32 @@ class XTimelineClient:
 
     # ---------- public APIs ----------
 
-    async def fetch_tweets(self, *, update_last_id: bool = False) -> list[Tweet]:
+    async def fetch_tweets(self, *, mode: FetchMode = "new_only") -> list[Tweet]:
         """
         Fetch entries and parse into `Tweet` objects.
 
         Parameters
         ----------
-        update_last_id : bool
-            If True, update the client's last-seen tweet id (skip older/equal).
+        mode : FetchMode
+            Controls which tweets are returned and whether the cursor advances.
+
+            - ``"all"``          — Return every tweet in the response. ``is_update``
+                                   is set for tweets seen in a previous call this
+                                   session, but nothing is filtered out. The cursor
+                                   is not advanced. Use this when your own downstream
+                                   store (e.g. a sqlite db) handles deduplication.
+            - ``"new_only"``     — Only return tweets newer than the last-seen
+                                   cursor. The cursor advances to the highest new id.
+                                   Classic "firehose new content only" mode.
+            - ``"with_updates"`` — Return new tweets **and** re-emit previously seen
+                                   tweets with fresh metrics/text (``is_update=True``).
+                                   Tweets older than the cursor that were never seen
+                                   are skipped. The cursor advances on new ids.
 
         Returns
         -------
         list[Tweet]
-            Parsed tweets (ads removed, deduped).
+            Parsed tweets, ads removed, deduped within this fetch.
         """
         payload = await self.fetch_raw(text=False)
         if not isinstance(payload, dict) or not payload:
@@ -691,34 +696,61 @@ class XTimelineClient:
             logger.warning("Raw payload saved to %s", dump_path)
 
         out: list[Tweet] = []
-        seen: set[int] = set()
+        seen_this_fetch: set[int] = set()
+        new_max_id = self._last_tweet_id
+
         for tw in self._iter_entry_tweets(self._get_entries(payload)):
-            parsed = self._parse_single_tweet(tw, allow_update_last_id=update_last_id)
-            if not parsed:
+            parsed = self._parse_single_tweet(tw)
+            if not parsed or parsed.id in seen_this_fetch:
                 continue
-            if parsed.id in seen:
-                continue
-            seen.add(parsed.id)
+            seen_this_fetch.add(parsed.id)
+
+            if mode == "all":
+                parsed.is_update = parsed.id in self._seen_ids
+                self._seen_ids.add(parsed.id)
+            elif mode == "new_only":
+                if parsed.id <= self._last_tweet_id:
+                    continue
+                self._seen_ids.add(parsed.id)
+                new_max_id = max(new_max_id, parsed.id)
+            elif mode == "with_updates":
+                if parsed.id > self._last_tweet_id:
+                    self._seen_ids.add(parsed.id)
+                    new_max_id = max(new_max_id, parsed.id)
+                elif parsed.id in self._seen_ids:
+                    parsed.is_update = True
+                else:
+                    continue
+
             out.append(parsed)
+
+        if mode in ("new_only", "with_updates") and new_max_id > self._last_tweet_id:
+            self._last_tweet_id = new_max_id
+            self._store_last_id()
+
         return out
 
-    async def stream(self, interval_s: float = 5.0) -> AsyncIterator[Tweet]:
+    async def stream(
+        self, interval_s: float = 5.0, mode: FetchMode = "new_only"
+    ) -> AsyncIterator[Tweet]:
         """
-        Async generator that yields new tweets forever.
+        Async generator that yields tweets forever.
 
         Parameters
         ----------
         interval_s : float
             Polling interval in seconds.
+        mode : FetchMode
+            Same options as :meth:`fetch_tweets`. Defaults to ``"new_only"``.
 
         Yields
         ------
         Tweet
-            Each new parsed Tweet.
+            Each parsed Tweet, according to the chosen mode.
         """
         while True:
             try:
-                for tw in await self.fetch_tweets(update_last_id=True):
+                for tw in await self.fetch_tweets(mode=mode):
                     yield tw
             except Exception as e:
                 logger.error("stream() iteration error: %s", e)
@@ -729,7 +761,7 @@ async def _example_once():
     async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
     ) as xc:
-        tweets = await xc.fetch_tweets(update_last_id=False)
+        tweets = await xc.fetch_tweets(mode="all")
         for t in tweets:
             print(t)
 

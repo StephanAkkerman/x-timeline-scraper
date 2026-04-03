@@ -177,7 +177,7 @@ def client() -> XTimelineClient:
 
 
 def _parse(client: XTimelineClient, tw: dict) -> object:
-    return client._parse_single_tweet(tw, allow_update_last_id=False)
+    return client._parse_single_tweet(tw)
 
 
 # ---------------------------------------------------------------------------
@@ -455,3 +455,145 @@ class TestEntities:
     def test_hashtag_uppercased(self, client):
         t = _parse(client, TWEET_WITH_TICKERS_AND_HASHTAGS)
         assert "BITCOIN" in t.hashtags
+
+
+# ---------------------------------------------------------------------------
+# Update tracking
+# ---------------------------------------------------------------------------
+
+def _make_payload(*tweet_nodes: dict) -> dict:
+    """Wrap tweet nodes in a minimal home timeline payload."""
+    entries = [
+        {
+            "entryId": f"tweet-{tw['rest_id']}",
+            "content": {
+                "__typename": "TimelineTimelineItem",
+                "entryType": "TimelineTimelineItem",
+                "itemContent": {
+                    "__typename": "TimelineTweet",
+                    "itemType": "TimelineTweet",
+                    "tweet_results": {"result": tw},
+                },
+            },
+        }
+        for tw in tweet_nodes
+    ]
+    return {
+        "data": {
+            "home": {
+                "home_timeline_urt": {
+                    "instructions": [{"type": "TimelineAddEntries", "entries": entries}]
+                }
+            }
+        }
+    }
+
+
+def _tw(tweet_id: str) -> dict:
+    """Minimal tweet node with a given ID."""
+    return {
+        "__typename": "Tweet",
+        "rest_id": tweet_id,
+        "core": _wrap_user("User", "user"),
+        "legacy": {
+            "id_str": tweet_id,
+            "full_text": f"Tweet {tweet_id}",
+            "favorite_count": 10,
+            "retweet_count": 2,
+            "reply_count": 1,
+            "entities": {"hashtags": [], "symbols": [], "urls": []},
+        },
+    }
+
+
+class TestUpdateTracking:
+    def test_new_tweet_is_not_update(self, client):
+        t = _parse(client, _tw("1000"))
+        assert t.is_update is False
+
+    def test_first_fetch_all_new(self, client):
+        payload = _make_payload(_tw("1001"), _tw("1002"), _tw("1003"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            import asyncio
+            results = asyncio.run(client.fetch_tweets(mode="with_updates"))
+        assert all(not t.is_update for t in results)
+        assert {t.id for t in results} == {1001, 1002, 1003}
+
+    def test_second_fetch_marks_seen_as_update(self, client):
+        import asyncio
+        # First fetch — seeds _seen_ids
+        payload1 = _make_payload(_tw("1001"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload1):
+            asyncio.run(client.fetch_tweets(mode="with_updates"))
+
+        # Second fetch — same tweets come back (engagement changed), plus one new
+        payload2 = _make_payload(_tw("1003"), _tw("1001"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload2):
+            results = asyncio.run(client.fetch_tweets(mode="with_updates"))
+
+        by_id = {t.id: t for t in results}
+        assert by_id[1003].is_update is False   # new
+        assert by_id[1001].is_update is True    # update
+        assert by_id[1002].is_update is True    # update
+
+    def test_unseen_old_tweet_skipped(self, client):
+        """Tweets older than the cursor that were never in _seen_ids are skipped."""
+        import asyncio
+        client._last_tweet_id = 2000  # simulate cursor already advanced
+
+        payload = _make_payload(_tw("1500"))  # old tweet, not in _seen_ids
+        with patch.object(client, "fetch_raw", return_value=payload):
+            results = asyncio.run(client.fetch_tweets(mode="with_updates"))
+        assert results == []
+
+    def test_cursor_advances_to_max_new_id(self, client):
+        import asyncio
+        payload = _make_payload(_tw("1001"), _tw("1003"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            asyncio.run(client.fetch_tweets(mode="with_updates"))
+        assert client._last_tweet_id == 1003
+
+    def test_all_mode_returns_everything_including_old(self, client):
+        import asyncio
+        client._last_tweet_id = 2000  # cursor is ahead
+        client._seen_ids = {1001}
+
+        payload = _make_payload(_tw("1001"), _tw("1500"), _tw("3000"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            results = asyncio.run(client.fetch_tweets(mode="all"))
+
+        ids = {t.id for t in results}
+        assert ids == {1001, 1500, 3000}  # nothing skipped
+
+    def test_all_mode_sets_is_update_for_known_ids(self, client):
+        import asyncio
+        client._seen_ids = {1001}
+
+        payload = _make_payload(_tw("1001"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            results = asyncio.run(client.fetch_tweets(mode="all"))
+
+        by_id = {t.id: t for t in results}
+        assert by_id[1001].is_update is True
+        assert by_id[1002].is_update is False
+
+    def test_all_mode_does_not_advance_cursor(self, client):
+        import asyncio
+        client._last_tweet_id = 500
+
+        payload = _make_payload(_tw("1001"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            asyncio.run(client.fetch_tweets(mode="all"))
+
+        assert client._last_tweet_id == 500  # unchanged
+
+    def test_new_only_mode_skips_seen_tweets(self, client):
+        import asyncio
+        client._last_tweet_id = 1001
+
+        payload = _make_payload(_tw("1001"), _tw("1000"), _tw("1002"))
+        with patch.object(client, "fetch_raw", return_value=payload):
+            results = asyncio.run(client.fetch_tweets(mode="new_only"))
+
+        assert {t.id for t in results} == {1002}
+        assert client._last_tweet_id == 1002
