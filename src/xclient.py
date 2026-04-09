@@ -7,13 +7,12 @@ import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Iterable, Literal
-
-FetchMode = Literal["all", "new_only", "with_updates"]
-
 import aiohttp
 import uncurl
 
 from tweet import MediaItem, Tweet
+
+FetchMode = Literal["all", "new_only", "with_updates"]
 
 logger = logging.getLogger(__file__)
 
