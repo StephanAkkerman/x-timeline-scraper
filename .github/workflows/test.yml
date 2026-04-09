@@ -1,0 +1,46 @@
+name: Test
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        paths:
+            - "**/*.py"
+            - "requirements.txt"
+            - "pyproject.toml"
+            - ".github/workflows/test.yml"
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+
+            - name: Free disk space
+              run: |
+                  sudo rm -rf /usr/share/dotnet || true
+                  sudo rm -rf /usr/local/lib/android || true
+                  sudo rm -rf /opt/ghc || true
+                  sudo rm -rf /usr/local/share/boost || true
+                  sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+
+            - name: Set up Python 3.11
+              uses: actions/setup-python@v6
+              with:
+                  python-version: "3.11"
+                  cache: "pip"
+                  cache-dependency-path: |
+                      requirements.txt
+                      requirements-dev.txt
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install -e . -r requirements.txt
+
+            - name: Run tests
+              run: |
+                  pytest tests/ -v --tb=long

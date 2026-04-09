@@ -4,6 +4,7 @@ Replace all contents of this file with the following:
 3. On the home timeline (click on following) press F12, this will open devtools in Chrome
 4. Go to the Network section
 5. Locate HomeTimeline or HomeLatestTimeline (when using Following tab)
+   You can filter on XHR and use the search bar to quickly find it. Try a refresh if you do not see it.
 6. Right click on HomeTimeline, copy
    Chrome: copy as cURL (bash)
    Firefox: copy as cURL (posix)

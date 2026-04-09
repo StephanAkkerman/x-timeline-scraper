@@ -1,6 +1,6 @@
-"""Tests for XTimelineClient._parse_single_tweet using real-payload fixtures.
+"""Tests for XTimelineClient._parse_single_tweet using synthetic fixtures.
 
-Fixtures are minimal slices of the actual API response captured 2026-04-01.
+Fixtures use entirely fictional usernames, IDs, and content.
 Key structure change vs legacy: user identity fields moved out of result.legacy
 into result.core (name, screen_name) and result.avatar (image_url).
 """
@@ -9,11 +9,17 @@ from unittest.mock import patch
 
 import pytest
 
-from xclient import XTimelineClient, _collapse_curl, _extract_cookies_from_curl, expand_tco_urls
+from xclient import (
+    XTimelineClient,
+    _collapse_curl,
+    _extract_cookies_from_curl,
+    expand_tco_urls,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _user_node(name: str, screen_name: str, image_url: str = "") -> dict:
     """Build a minimal user_results.result node using the new API shape."""
@@ -30,34 +36,34 @@ def _wrap_user(name: str, screen_name: str, image_url: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — minimal slices of the 2026-04-01 real payload
+# Fixtures — synthetic payloads mirroring the API shape
 # ---------------------------------------------------------------------------
 
 PLAIN_TWEET: dict = {
     "__typename": "Tweet",
-    "rest_id": "2039421316445724961",
+    "rest_id": "2039100000000000001",
     "core": _wrap_user(
-        "First Squawk",
-        "FirstSquawk",
-        "https://pbs.twimg.com/profile_images/squawk_normal.jpg",
+        "Test News Bot",
+        "testnewsbot",
+        "https://pbs.twimg.com/profile_images/test_news_bot_normal.jpg",
     ),
     "legacy": {
-        "id_str": "2039421316445724961",
-        "full_text": "US CONGRESS GOP LEADERS: TO ADVANCE BILLS TO FULLY FUND HOMELAND SECURITY PROGRAMS",
+        "id_str": "2039100000000000001",
+        "full_text": "CENTRAL BANK ANNOUNCES NEW INTEREST RATE POLICY",
         "entities": {"hashtags": [], "symbols": []},
     },
 }
 
 QUOTE_TWEET: dict = {
     "__typename": "Tweet",
-    "rest_id": "2039421494527160688",
+    "rest_id": "2039100000000000002",
     "core": _wrap_user(
-        "TraderSZ",
-        "trader1sz",
-        "https://pbs.twimg.com/profile_images/tradersz_normal.jpg",
+        "Alice Trader",
+        "alicetrader",
+        "https://pbs.twimg.com/profile_images/alice_trader_normal.jpg",
     ),
     "legacy": {
-        "id_str": "2039421494527160688",
+        "id_str": "2039100000000000002",
         "full_text": "$ETHBTC breaking out? https://t.co/JeAapElptJ",
         "entities": {
             "symbols": [{"text": "ETHBTC", "indices": [0, 7]}],
@@ -67,15 +73,15 @@ QUOTE_TWEET: dict = {
     "quoted_status_result": {
         "result": {
             "__typename": "Tweet",
-            "rest_id": "2037910161172377806",
+            "rest_id": "2039100000000000012",
             "core": _wrap_user(
-                "TraderSZ",
-                "trader1sz",
-                "https://pbs.twimg.com/profile_images/tradersz_normal.jpg",
+                "Alice Trader",
+                "alicetrader",
+                "https://pbs.twimg.com/profile_images/alice_trader_normal.jpg",
             ),
             "views": {"count": "5000", "state": "Enabled"},
             "legacy": {
-                "id_str": "2037910161172377806",
+                "id_str": "2039100000000000012",
                 "full_text": "$ETHBTC doesnt look too bad here",
                 "created_at": "Tue Apr 01 12:00:00 +0000 2026",
                 "favorite_count": 50,
@@ -92,27 +98,27 @@ QUOTE_TWEET: dict = {
 
 RETWEET: dict = {
     "__typename": "Tweet",
-    "rest_id": "2039421365132906855",
+    "rest_id": "2039100000000000003",
     "core": _wrap_user(
-        "TraderSZ",
-        "trader1sz",
-        "https://pbs.twimg.com/profile_images/tradersz_normal.jpg",
+        "Alice Trader",
+        "alicetrader",
+        "https://pbs.twimg.com/profile_images/alice_trader_normal.jpg",
     ),
     "legacy": {
-        "id_str": "2039421365132906855",
-        "full_text": "RT @CryptoJelleNL: Many of you will remember my bull run plan...",
+        "id_str": "2039100000000000003",
+        "full_text": "RT @bobcrypto: Many of you will remember my bull run plan...",
         "entities": {"hashtags": [], "symbols": []},
         "retweeted_status_result": {
             "result": {
                 "__typename": "Tweet",
-                "rest_id": "2038894508343963755",
+                "rest_id": "2039100000000000013",
                 "core": _wrap_user(
-                    "Jelle",
-                    "CryptoJelleNL",
-                    "https://pbs.twimg.com/profile_images/jelle_normal.jpg",
+                    "Bob Crypto",
+                    "bobcrypto",
+                    "https://pbs.twimg.com/profile_images/bob_crypto_normal.jpg",
                 ),
                 "legacy": {
-                    "id_str": "2038894508343963755",
+                    "id_str": "2039100000000000013",
                     "full_text": "Many of you will remember my bull run plan.",
                     "entities": {"hashtags": [], "symbols": []},
                 },
@@ -124,7 +130,7 @@ RETWEET: dict = {
 TWEET_WITH_MEDIA: dict = {
     "__typename": "Tweet",
     "rest_id": "2039000000000000001",
-    "core": _wrap_user("TraderSZ", "trader1sz"),
+    "core": _wrap_user("Alice Trader", "alicetrader"),
     "legacy": {
         "id_str": "2039000000000000001",
         "full_text": "Chart attached https://t.co/abc123",
@@ -174,6 +180,7 @@ TWEET_WITH_TICKERS_AND_HASHTAGS: dict = {
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def client() -> XTimelineClient:
     with (
@@ -193,20 +200,26 @@ def _parse(client: XTimelineClient, tw: dict) -> object:
 # User field extraction
 # ---------------------------------------------------------------------------
 
+
 class TestUserField:
     def test_name_from_result_core(self, client):
-        assert client._user_field(PLAIN_TWEET, "name") == "First Squawk"
+        assert client._user_field(PLAIN_TWEET, "name") == "Test News Bot"
 
     def test_screen_name_from_result_core(self, client):
-        assert client._user_field(PLAIN_TWEET, "screen_name") == "FirstSquawk"
+        assert client._user_field(PLAIN_TWEET, "screen_name") == "testnewsbot"
 
     def test_profile_image_from_result_avatar(self, client):
         assert client._user_field(PLAIN_TWEET, "profile_image_url_https") == (
-            "https://pbs.twimg.com/profile_images/squawk_normal.jpg"
+            "https://pbs.twimg.com/profile_images/test_news_bot_normal.jpg"
         )
 
     def test_missing_user_returns_empty_string(self, client):
-        tw = {"__typename": "Tweet", "rest_id": "1", "core": {}, "legacy": {"id_str": "1", "full_text": "", "entities": {}}}
+        tw = {
+            "__typename": "Tweet",
+            "rest_id": "1",
+            "core": {},
+            "legacy": {"id_str": "1", "full_text": "", "entities": {}},
+        }
         assert client._user_field(tw, "name") == ""
 
     def test_legacy_stat_field_still_works(self, client):
@@ -229,50 +242,52 @@ class TestUserField:
 # Plain tweet
 # ---------------------------------------------------------------------------
 
+
 class TestPlainTweet:
     def test_id(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.id == 2039421316445724961
+        assert t.id == 2039100000000000001
 
     def test_user_name(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.user_name == "First Squawk"
+        assert t.user_name == "Test News Bot"
 
     def test_user_screen_name(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.user_screen_name == "FirstSquawk"
+        assert t.user_screen_name == "testnewsbot"
 
     def test_user_img(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.user_img == "https://pbs.twimg.com/profile_images/squawk_normal.jpg"
+        assert t.user_img == "https://pbs.twimg.com/profile_images/test_news_bot_normal.jpg"
 
     def test_title(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.title == "First Squawk tweeted"
+        assert t.title == "Test News Bot tweeted"
 
     def test_text(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert "HOMELAND SECURITY" in t.text
+        assert "INTEREST RATE" in t.text
 
     def test_url(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.url == "https://twitter.com/user/status/2039421316445724961"
+        assert t.url == "https://twitter.com/user/status/2039100000000000001"
 
 
 # ---------------------------------------------------------------------------
 # Quote tweet
 # ---------------------------------------------------------------------------
 
+
 class TestQuoteTweet:
     def test_outer_user(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.user_name == "TraderSZ"
-        assert t.user_screen_name == "trader1sz"
+        assert t.user_name == "Alice Trader"
+        assert t.user_screen_name == "alicetrader"
 
     def test_title_includes_quoted_user(self, client):
         t = _parse(client, QUOTE_TWEET)
         assert "quote tweeted" in t.title
-        assert "TraderSZ" in t.title
+        assert "Alice Trader" in t.title
 
     def test_quoted_text_appended(self, client):
         t = _parse(client, QUOTE_TWEET)
@@ -287,15 +302,16 @@ class TestQuoteTweet:
 # Retweet
 # ---------------------------------------------------------------------------
 
+
 class TestRetweet:
     def test_outer_user(self, client):
         t = _parse(client, RETWEET)
-        assert t.user_name == "TraderSZ"
+        assert t.user_name == "Alice Trader"
 
     def test_title_includes_retweeted_user(self, client):
         t = _parse(client, RETWEET)
         assert "retweeted" in t.title
-        assert "Jelle" in t.title
+        assert "Bob Crypto" in t.title
 
     def test_text_is_original(self, client):
         t = _parse(client, RETWEET)
@@ -305,6 +321,7 @@ class TestRetweet:
 # ---------------------------------------------------------------------------
 # Media
 # ---------------------------------------------------------------------------
+
 
 class TestMedia:
     def test_photo_parsed(self, client):
@@ -321,6 +338,7 @@ class TestMedia:
 # ---------------------------------------------------------------------------
 # Tickers and hashtags
 # ---------------------------------------------------------------------------
+
 
 class TestMetrics:
     def test_created_at_parsed_to_iso(self, client):
@@ -357,7 +375,7 @@ class TestMetrics:
 TWEET_WITH_URL: dict = {
     "__typename": "Tweet",
     "rest_id": "2039000000000000004",
-    "core": _wrap_user("FlappyBert", "flappybert"),
+    "core": _wrap_user("Game Dev", "gamedev"),
     "legacy": {
         "id_str": "2039000000000000004",
         "full_text": "Play now 👉 https://t.co/tOjx6u4o0o",
@@ -367,8 +385,8 @@ TWEET_WITH_URL: dict = {
             "urls": [
                 {
                     "url": "https://t.co/tOjx6u4o0o",
-                    "expanded_url": "http://t.me/FlappyBertBot",
-                    "display_url": "t.me/FlappyBertBot",
+                    "expanded_url": "https://example.com/game",
+                    "display_url": "example.com/game",
                 }
             ],
         },
@@ -386,7 +404,10 @@ TWEET_WITH_MEDIA_URL: dict = {
         "entities": {"hashtags": [], "symbols": [], "urls": []},
         "extended_entities": {
             "media": [
-                {"media_url_https": "https://pbs.twimg.com/media/photo.jpg", "type": "photo"}
+                {
+                    "media_url_https": "https://pbs.twimg.com/media/photo.jpg",
+                    "type": "photo",
+                }
             ]
         },
     },
@@ -436,7 +457,7 @@ class TestLongTweet:
 class TestUrlExpansion:
     def test_tco_replaced_with_expanded(self, client):
         t = _parse(client, TWEET_WITH_URL)
-        assert "http://t.me/FlappyBertBot" in t.text
+        assert "https://example.com/game" in t.text
         assert "t.co" not in t.text
 
     def test_media_tco_still_stripped(self, client):
@@ -450,7 +471,10 @@ class TestUrlExpansion:
         assert result == "see https://example.com and https://example.com"
 
     def test_expand_tco_urls_ignores_missing_fields(self):
-        entities = [{"url": "", "expanded_url": "https://example.com"}, {"url": "https://t.co/abc"}]
+        entities = [
+            {"url": "", "expanded_url": "https://example.com"},
+            {"url": "https://t.co/abc"},
+        ]
         # should not raise, text unchanged for invalid entries
         result = expand_tco_urls("https://t.co/abc", entities)
         assert result == "https://t.co/abc"
@@ -469,6 +493,7 @@ class TestEntities:
 # ---------------------------------------------------------------------------
 # Update tracking
 # ---------------------------------------------------------------------------
+
 
 def _make_payload(*tweet_nodes: dict) -> dict:
     """Wrap tweet nodes in a minimal home timeline payload."""
@@ -524,12 +549,14 @@ class TestUpdateTracking:
         payload = _make_payload(_tw("1001"), _tw("1002"), _tw("1003"))
         with patch.object(client, "fetch_raw", return_value=payload):
             import asyncio
+
             results = asyncio.run(client.fetch_tweets(mode="with_updates"))
         assert all(not t.is_update for t in results)
         assert {t.id for t in results} == {1001, 1002, 1003}
 
     def test_second_fetch_marks_seen_as_update(self, client):
         import asyncio
+
         # First fetch — seeds _seen_ids
         payload1 = _make_payload(_tw("1001"), _tw("1002"))
         with patch.object(client, "fetch_raw", return_value=payload1):
@@ -541,13 +568,14 @@ class TestUpdateTracking:
             results = asyncio.run(client.fetch_tweets(mode="with_updates"))
 
         by_id = {t.id: t for t in results}
-        assert by_id[1003].is_update is False   # new
-        assert by_id[1001].is_update is True    # update
-        assert by_id[1002].is_update is True    # update
+        assert by_id[1003].is_update is False  # new
+        assert by_id[1001].is_update is True  # update
+        assert by_id[1002].is_update is True  # update
 
     def test_unseen_old_tweet_skipped(self, client):
         """Tweets older than the cursor that were never in _seen_ids are skipped."""
         import asyncio
+
         client._last_tweet_id = 2000  # simulate cursor already advanced
 
         payload = _make_payload(_tw("1500"))  # old tweet, not in _seen_ids
@@ -557,6 +585,7 @@ class TestUpdateTracking:
 
     def test_cursor_advances_to_max_new_id(self, client):
         import asyncio
+
         payload = _make_payload(_tw("1001"), _tw("1003"), _tw("1002"))
         with patch.object(client, "fetch_raw", return_value=payload):
             asyncio.run(client.fetch_tweets(mode="with_updates"))
@@ -564,6 +593,7 @@ class TestUpdateTracking:
 
     def test_all_mode_returns_everything_including_old(self, client):
         import asyncio
+
         client._last_tweet_id = 2000  # cursor is ahead
         client._seen_ids = {1001}
 
@@ -576,6 +606,7 @@ class TestUpdateTracking:
 
     def test_all_mode_sets_is_update_for_known_ids(self, client):
         import asyncio
+
         client._seen_ids = {1001}
 
         payload = _make_payload(_tw("1001"), _tw("1002"))
@@ -588,6 +619,7 @@ class TestUpdateTracking:
 
     def test_all_mode_does_not_advance_cursor(self, client):
         import asyncio
+
         client._last_tweet_id = 500
 
         payload = _make_payload(_tw("1001"), _tw("1002"))
@@ -598,6 +630,7 @@ class TestUpdateTracking:
 
     def test_new_only_mode_skips_seen_tweets(self, client):
         import asyncio
+
         client._last_tweet_id = 1001
 
         payload = _make_payload(_tw("1001"), _tw("1000"), _tw("1002"))
@@ -612,6 +645,7 @@ class TestUpdateTracking:
 # Quoted tweet field
 # ---------------------------------------------------------------------------
 
+
 class TestQuotedTweetField:
     def test_quoted_tweet_is_populated(self, client):
         t = _parse(client, QUOTE_TWEET)
@@ -619,23 +653,28 @@ class TestQuotedTweetField:
 
     def test_quoted_tweet_user_name(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.quoted_tweet.user_name == "TraderSZ"
+        assert t.quoted_tweet.user_name == "Alice Trader"
 
     def test_quoted_tweet_user_screen_name(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.quoted_tweet.user_screen_name == "trader1sz"
+        assert t.quoted_tweet.user_screen_name == "alicetrader"
 
     def test_quoted_tweet_user_img(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.quoted_tweet.user_img == "https://pbs.twimg.com/profile_images/tradersz_normal.jpg"
+        assert (
+            t.quoted_tweet.user_img
+            == "https://pbs.twimg.com/profile_images/alice_trader_normal.jpg"
+        )
 
     def test_quoted_tweet_id(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.quoted_tweet.id == 2037910161172377806
+        assert t.quoted_tweet.id == 2039100000000000012
 
     def test_quoted_tweet_url(self, client):
         t = _parse(client, QUOTE_TWEET)
-        assert t.quoted_tweet.url == "https://twitter.com/user/status/2037910161172377806"
+        assert (
+            t.quoted_tweet.url == "https://twitter.com/user/status/2039100000000000012"
+        )
 
     def test_quoted_tweet_text(self, client):
         t = _parse(client, QUOTE_TWEET)
@@ -673,7 +712,7 @@ class TestQuotedTweetField:
         t = _parse(client, QUOTE_TWEET)
         d = t.to_dict()
         assert isinstance(d["quoted_tweet"], dict)
-        assert d["quoted_tweet"]["user_screen_name"] == "trader1sz"
+        assert d["quoted_tweet"]["user_screen_name"] == "alicetrader"
 
     def test_plain_tweet_quoted_tweet_is_none_in_to_dict(self, client):
         t = _parse(client, PLAIN_TWEET)
@@ -695,7 +734,10 @@ VISIBILITY_TWEET: dict = {
                     "__typename": "CtaLimitedActionPrompt",
                     "cta_type": "SeeConversation",
                     "headline": {"entities": [], "text": "Who can reply?"},
-                    "subtext": {"entities": [], "text": "Only some accounts can reply."},
+                    "subtext": {
+                        "entities": [],
+                        "text": "Only some accounts can reply.",
+                    },
                 },
             }
         ]
@@ -704,9 +746,9 @@ VISIBILITY_TWEET: dict = {
         "__typename": "Tweet",
         "rest_id": "2039500000000000001",
         "core": _wrap_user(
-            "Crypto Mikey",
-            "CryptoCX1",
-            "https://pbs.twimg.com/profile_images/mikey_normal.jpg",
+            "Carol Analyst",
+            "carolanalyst",
+            "https://pbs.twimg.com/profile_images/carol_analyst_normal.jpg",
         ),
         "views": {"count": "12000", "state": "Enabled"},
         "legacy": {
@@ -731,6 +773,7 @@ class TestVisibilityTweet:
     def _parse_wrapped(self, client):
         """Simulate how the entry parser calls normalize_tweet_result."""
         from xclient import normalize_tweet_result
+
         tw = normalize_tweet_result({"result": VISIBILITY_TWEET})
         return client._parse_single_tweet(tw)
 
@@ -744,11 +787,11 @@ class TestVisibilityTweet:
 
     def test_user_name(self, client):
         t = self._parse_wrapped(client)
-        assert t.user_name == "Crypto Mikey"
+        assert t.user_name == "Carol Analyst"
 
     def test_user_screen_name(self, client):
         t = self._parse_wrapped(client)
-        assert t.user_screen_name == "CryptoCX1"
+        assert t.user_screen_name == "carolanalyst"
 
     def test_text(self, client):
         t = self._parse_wrapped(client)
@@ -768,12 +811,91 @@ class TestVisibilityTweet:
 
 
 # ---------------------------------------------------------------------------
+# Subscriber (creator subscription / Super Follow) tweets
+# ---------------------------------------------------------------------------
+
+SUBSCRIBER_TWEET: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039100000000000020",
+    "core": _wrap_user(
+        "Premium Creator",
+        "premiumcreator",
+        "https://pbs.twimg.com/profile_images/premium_creator_normal.jpg",
+    ),
+    "exclusivityInfo": {
+        "creator_results": {
+            "result": {
+                "__typename": "User",
+                "core": {"screen_name": "premiumcreator"},
+            }
+        }
+    },
+    "views": {"count": "10383", "state": "EnabledWithCount"},
+    "legacy": {
+        "id_str": "2039100000000000020",
+        "full_text": "Exclusive update for subscribers.",
+        "created_at": "Thu Apr 02 20:50:57 +0000 2026",
+        "favorite_count": 78,
+        "retweet_count": 0,
+        "reply_count": 4,
+        "entities": {
+            "hashtags": [],
+            "symbols": [],
+        },
+    },
+}
+
+PLAIN_TWEET_NO_EXCLUSIVITY: dict = {
+    "__typename": "Tweet",
+    "rest_id": "2039807822733377842",
+    "core": _wrap_user("Someone", "someone"),
+    "legacy": {
+        "id_str": "2039807822733377842",
+        "full_text": "Regular tweet, no exclusivity.",
+        "entities": {"hashtags": [], "symbols": []},
+    },
+}
+
+
+class TestSubscriberTweet:
+    def test_is_subscriber_only_true_when_exclusivity_info_present(self, client):
+        t = _parse(client, SUBSCRIBER_TWEET)
+        assert t.is_subscriber_only is True
+
+    def test_is_subscriber_only_false_for_regular_tweet(self, client):
+        t = _parse(client, PLAIN_TWEET_NO_EXCLUSIVITY)
+        assert t.is_subscriber_only is False
+
+    def test_is_subscriber_only_false_for_plain_tweet(self, client):
+        t = _parse(client, PLAIN_TWEET)
+        assert t.is_subscriber_only is False
+
+    def test_user_fields_parsed_normally(self, client):
+        t = _parse(client, SUBSCRIBER_TWEET)
+        assert t.user_screen_name == "premiumcreator"
+        assert (
+            t.user_img
+            == "https://pbs.twimg.com/profile_images/premium_creator_normal.jpg"
+        )
+
+    def test_metrics_parsed_normally(self, client):
+        t = _parse(client, SUBSCRIBER_TWEET)
+        assert t.likes == 78
+        assert t.replies == 4
+        assert t.views == 10383
+
+    def test_serialized_in_to_dict(self, client):
+        t = _parse(client, SUBSCRIBER_TWEET)
+        d = t.to_dict()
+        assert d["is_subscriber_only"] is True
+
+
+# ---------------------------------------------------------------------------
 # Cookie extraction — Chrome and Firefox curl formats
 # ---------------------------------------------------------------------------
 
 _CHROME_CURL = (
-    "curl 'https://example.com' "
-    "-b 'auth_token=abc123; ct0=def456; __cuid=xyz'"
+    "curl 'https://example.com' -b 'auth_token=abc123; ct0=def456; __cuid=xyz'"
 )
 
 _FIREFOX_CURL = (

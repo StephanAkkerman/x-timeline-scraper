@@ -62,6 +62,7 @@ class Tweet:
     replies: int = 0
     views: int = 0
     is_update: bool = False
+    is_subscriber_only: bool = False
     quoted_tweet: Tweet | None = None
 
     def to_dict(self) -> dict:

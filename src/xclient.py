@@ -236,8 +236,12 @@ class XTimelineClient:
             self._req = {}
 
     def _log_request_health_hint(self) -> None:
-        headers = {str(k).lower(): str(v) for k, v in self._req.get("headers", {}).items()}
-        cookies = {str(k).lower(): str(v) for k, v in self._req.get("cookies", {}).items()}
+        headers = {
+            str(k).lower(): str(v) for k, v in self._req.get("headers", {}).items()
+        }
+        cookies = {
+            str(k).lower(): str(v) for k, v in self._req.get("cookies", {}).items()
+        }
         warnings: list[str] = []
 
         if "authorization" not in headers:
@@ -465,11 +469,7 @@ class XTimelineClient:
         )
 
     def _user_field(self, tweet: dict, key: str) -> str:
-        result = (
-            tweet.get("core", {})
-            .get("user_results", {})
-            .get("result", {})
-        )
+        result = tweet.get("core", {}).get("user_results", {}).get("result", {})
         # New API shape: name/screen_name live in result.core; image in result.avatar
         if key in ("name", "screen_name", "created_at"):
             value = result.get("core", {}).get(key, "")
@@ -590,6 +590,9 @@ class XTimelineClient:
         # media
         media_items, media_types = self._collect_media(tw)
 
+        # subscriber-only (creator subscription / Super Follow)
+        is_subscriber_only = bool(tw.get("exclusivityInfo"))
+
         # reply/quote/retweet handling (best-effort)
         title = f"{user_name} tweeted"
         quoted = tw.get("quoted_status_result") or None
@@ -666,6 +669,7 @@ class XTimelineClient:
             retweets=retweets,
             replies=replies,
             views=views,
+            is_subscriber_only=is_subscriber_only,
             quoted_tweet=quoted_tweet,
         )
 
@@ -791,7 +795,7 @@ async def _example_stream():
 
 
 # if __name__ == "__main__":
-    # asyncio.run(_example_stream())
-    # Set os env XCLIENT_DEBUG_HTTP
-    # os.environ["XCLIENT_DEBUG_HTTP"] = "1"
-    # asyncio.run(_example_once())
+# asyncio.run(_example_stream())
+# Set os env XCLIENT_DEBUG_HTTP
+# os.environ["XCLIENT_DEBUG_HTTP"] = "1"
+# asyncio.run(_example_once())
