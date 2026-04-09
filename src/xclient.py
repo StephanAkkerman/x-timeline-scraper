@@ -122,17 +122,26 @@ def _parse_cookie_string(cookie_blob: str) -> dict[str, str]:
     return out
 
 
+def _collapse_curl(raw_curl: str) -> str:
+    """Collapse backslash-newline continuations into a single line."""
+    return re.sub(r"\\\s*\n\s*", " ", raw_curl)
+
+
 def _extract_cookies_from_curl(raw_curl: str) -> dict[str, str]:
-    collapsed = re.sub(r"\\\s*\n", " ", raw_curl)
+    collapsed = _collapse_curl(raw_curl)
     out: dict[str, str] = {}
     patterns = [
+        # -b / --cookie flags (Chrome/curl format)
         r"(?:^|\s)-b\s+'([^']+)'",
         r'(?:^|\s)-b\s+"([^"]+)"',
         r"(?:^|\s)--cookie\s+'([^']+)'",
         r'(?:^|\s)--cookie\s+"([^"]+)"',
+        # -H 'Cookie: ...' header (Firefox format)
+        r"-H\s+'Cookie:\s*([^']+)'",
+        r'-H\s+"Cookie:\s*([^"]+)"',
     ]
     for pat in patterns:
-        for m in re.finditer(pat, collapsed):
+        for m in re.finditer(pat, collapsed, re.IGNORECASE):
             out.update(_parse_cookie_string(m.group(1)))
     return out
 
@@ -195,15 +204,19 @@ class XTimelineClient:
         """Parse the cURL file into url/headers/cookies/json payload."""
         try:
             raw = self.curl_path.read_text(encoding="utf-8")
-            ctx = uncurl.parse_context(
-                "".join(line.strip() for line in raw.splitlines())
-            )
-            parsed_cookies = dict(ctx.cookies) if ctx.cookies else {}
+            ctx = uncurl.parse_context(_collapse_curl(raw))
+            # Always prefer the regex extractor: it handles both Chrome (-b) and
+            # Firefox (-H 'Cookie: ...') formats and reconstructs the full cookie
+            # string even when uncurl's parser truncates long values.
+            parsed_cookies = _extract_cookies_from_curl(raw)
             if not parsed_cookies:
-                parsed_cookies = _extract_cookies_from_curl(raw)
+                parsed_cookies = dict(ctx.cookies) if ctx.cookies else {}
+            headers = dict(ctx.headers) if ctx.headers else {}
+            # Remove Cookie header from headers — aiohttp sends cookies separately
+            headers = {k: v for k, v in headers.items() if k.lower() != "cookie"}
             self._req = {
                 "url": ctx.url,
-                "headers": dict(ctx.headers) if ctx.headers else {},
+                "headers": headers,
                 "cookies": parsed_cookies,
                 "json": json.loads(ctx.data) if ctx.data else None,
                 "method": ctx.method.upper(),
@@ -600,9 +613,11 @@ class XTimelineClient:
             return self._parse_single_tweet(inner)
 
         nested: Tweet | None = None
+        quoted_tweet: Tweet | None = None
         if quoted:
             nested = _parse_nested(quoted)
             if nested:
+                quoted_tweet = nested
                 title = f"{user_name} quote tweeted {nested.user_name}"
                 q_text = "\n".join("> " + line for line in nested.text.splitlines())
                 text = f"{text}\n\n> [@{nested.user_screen_name}](https://twitter.com/{nested.user_screen_name}):\n{q_text}"
@@ -651,6 +666,7 @@ class XTimelineClient:
             retweets=retweets,
             replies=replies,
             views=views,
+            quoted_tweet=quoted_tweet,
         )
 
     # ---------- public APIs ----------

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from xclient import XTimelineClient, expand_tco_urls
+from xclient import XTimelineClient, _collapse_curl, _extract_cookies_from_curl, expand_tco_urls
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -68,10 +68,19 @@ QUOTE_TWEET: dict = {
         "result": {
             "__typename": "Tweet",
             "rest_id": "2037910161172377806",
-            "core": _wrap_user("TraderSZ", "trader1sz"),
+            "core": _wrap_user(
+                "TraderSZ",
+                "trader1sz",
+                "https://pbs.twimg.com/profile_images/tradersz_normal.jpg",
+            ),
+            "views": {"count": "5000", "state": "Enabled"},
             "legacy": {
                 "id_str": "2037910161172377806",
                 "full_text": "$ETHBTC doesnt look too bad here",
+                "created_at": "Tue Apr 01 12:00:00 +0000 2026",
+                "favorite_count": 50,
+                "retweet_count": 10,
+                "reply_count": 3,
                 "entities": {
                     "symbols": [{"text": "ETHBTC", "indices": [0, 7]}],
                     "hashtags": [],
@@ -597,3 +606,221 @@ class TestUpdateTracking:
 
         assert {t.id for t in results} == {1002}
         assert client._last_tweet_id == 1002
+
+
+# ---------------------------------------------------------------------------
+# Quoted tweet field
+# ---------------------------------------------------------------------------
+
+class TestQuotedTweetField:
+    def test_quoted_tweet_is_populated(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet is not None
+
+    def test_quoted_tweet_user_name(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.user_name == "TraderSZ"
+
+    def test_quoted_tweet_user_screen_name(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.user_screen_name == "trader1sz"
+
+    def test_quoted_tweet_user_img(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.user_img == "https://pbs.twimg.com/profile_images/tradersz_normal.jpg"
+
+    def test_quoted_tweet_id(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.id == 2037910161172377806
+
+    def test_quoted_tweet_url(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.url == "https://twitter.com/user/status/2037910161172377806"
+
+    def test_quoted_tweet_text(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.text == "$ETHBTC doesnt look too bad here"
+
+    def test_quoted_tweet_created_at(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.created_at == "2026-04-01T12:00:00Z"
+
+    def test_quoted_tweet_likes(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.likes == 50
+
+    def test_quoted_tweet_retweets(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.retweets == 10
+
+    def test_quoted_tweet_replies(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.replies == 3
+
+    def test_quoted_tweet_views(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        assert t.quoted_tweet.views == 5000
+
+    def test_plain_tweet_has_no_quoted_tweet(self, client):
+        t = _parse(client, PLAIN_TWEET)
+        assert t.quoted_tweet is None
+
+    def test_retweet_has_no_quoted_tweet(self, client):
+        t = _parse(client, RETWEET)
+        assert t.quoted_tweet is None
+
+    def test_quoted_tweet_serializes_in_to_dict(self, client):
+        t = _parse(client, QUOTE_TWEET)
+        d = t.to_dict()
+        assert isinstance(d["quoted_tweet"], dict)
+        assert d["quoted_tweet"]["user_screen_name"] == "trader1sz"
+
+    def test_plain_tweet_quoted_tweet_is_none_in_to_dict(self, client):
+        t = _parse(client, PLAIN_TWEET)
+        d = t.to_dict()
+        assert d["quoted_tweet"] is None
+
+
+# ---------------------------------------------------------------------------
+# TweetWithVisibilityResults (restricted reply / visibility)
+# ---------------------------------------------------------------------------
+
+VISIBILITY_TWEET: dict = {
+    "__typename": "TweetWithVisibilityResults",
+    "limitedActionResults": {
+        "limited_actions": [
+            {
+                "action": "Reply",
+                "prompt": {
+                    "__typename": "CtaLimitedActionPrompt",
+                    "cta_type": "SeeConversation",
+                    "headline": {"entities": [], "text": "Who can reply?"},
+                    "subtext": {"entities": [], "text": "Only some accounts can reply."},
+                },
+            }
+        ]
+    },
+    "tweet": {
+        "__typename": "Tweet",
+        "rest_id": "2039500000000000001",
+        "core": _wrap_user(
+            "Crypto Mikey",
+            "CryptoCX1",
+            "https://pbs.twimg.com/profile_images/mikey_normal.jpg",
+        ),
+        "views": {"count": "12000", "state": "Enabled"},
+        "legacy": {
+            "id_str": "2039500000000000001",
+            "full_text": "$SPX big test coming up.",
+            "created_at": "Tue Apr 01 15:00:00 +0000 2026",
+            "favorite_count": 80,
+            "retweet_count": 20,
+            "reply_count": 5,
+            "entities": {
+                "symbols": [{"text": "SPX", "indices": [0, 4]}],
+                "hashtags": [],
+            },
+        },
+    },
+}
+
+
+class TestVisibilityTweet:
+    """TweetWithVisibilityResults — restricted replies, tweet itself is visible."""
+
+    def _parse_wrapped(self, client):
+        """Simulate how the entry parser calls normalize_tweet_result."""
+        from xclient import normalize_tweet_result
+        tw = normalize_tweet_result({"result": VISIBILITY_TWEET})
+        return client._parse_single_tweet(tw)
+
+    def test_parsed_successfully(self, client):
+        t = self._parse_wrapped(client)
+        assert t is not None
+
+    def test_id(self, client):
+        t = self._parse_wrapped(client)
+        assert t.id == 2039500000000000001
+
+    def test_user_name(self, client):
+        t = self._parse_wrapped(client)
+        assert t.user_name == "Crypto Mikey"
+
+    def test_user_screen_name(self, client):
+        t = self._parse_wrapped(client)
+        assert t.user_screen_name == "CryptoCX1"
+
+    def test_text(self, client):
+        t = self._parse_wrapped(client)
+        assert "$SPX" in t.text
+
+    def test_likes(self, client):
+        t = self._parse_wrapped(client)
+        assert t.likes == 80
+
+    def test_views(self, client):
+        t = self._parse_wrapped(client)
+        assert t.views == 12000
+
+    def test_ticker_extracted(self, client):
+        t = self._parse_wrapped(client)
+        assert "SPX" in t.tickers
+
+
+# ---------------------------------------------------------------------------
+# Cookie extraction — Chrome and Firefox curl formats
+# ---------------------------------------------------------------------------
+
+_CHROME_CURL = (
+    "curl 'https://example.com' "
+    "-b 'auth_token=abc123; ct0=def456; __cuid=xyz'"
+)
+
+_FIREFOX_CURL = (
+    "curl 'https://example.com' \\\n"
+    "  -H 'Authorization: Bearer token' \\\n"
+    "  -H 'Cookie: auth_token=abc123; ct0=def456; __cuid=xyz' \\\n"
+    "  --data-raw '{}'"
+)
+
+_FIREFOX_CURL_LONG = (
+    # Simulates a long Cookie header that wraps across a line boundary when
+    # the browser copies it; the backslash continuation is mid-value.
+    "curl 'https://example.com' \\\n"
+    "  -H 'Authorization: Bearer token' \\\n"
+    "  -H 'Cookie: auth_token=abc123; ct0=def456; __cuid=xyz; extra=val' \\\n"
+    "  --data-raw '{}'"
+)
+
+
+class TestCookieParsing:
+    def test_chrome_format_extracts_auth_token(self):
+        cookies = _extract_cookies_from_curl(_CHROME_CURL)
+        assert cookies["auth_token"] == "abc123"
+
+    def test_chrome_format_extracts_ct0(self):
+        cookies = _extract_cookies_from_curl(_CHROME_CURL)
+        assert cookies["ct0"] == "def456"
+
+    def test_firefox_format_extracts_auth_token(self):
+        cookies = _extract_cookies_from_curl(_FIREFOX_CURL)
+        assert cookies["auth_token"] == "abc123"
+
+    def test_firefox_format_extracts_ct0(self):
+        cookies = _extract_cookies_from_curl(_FIREFOX_CURL)
+        assert cookies["ct0"] == "def456"
+
+    def test_firefox_format_extracts_cuid(self):
+        cookies = _extract_cookies_from_curl(_FIREFOX_CURL)
+        assert cookies["__cuid"] == "xyz"
+
+    def test_multiline_firefox_curl_extracts_all_cookies(self):
+        cookies = _extract_cookies_from_curl(_FIREFOX_CURL_LONG)
+        assert cookies["auth_token"] == "abc123"
+        assert cookies["ct0"] == "def456"
+        assert cookies["extra"] == "val"
+
+    def test_collapse_curl_joins_backslash_continuations(self):
+        raw = "curl 'url' \\\n  -H 'Foo: bar'"
+        assert "\\\n" not in _collapse_curl(raw)
+        assert "-H 'Foo: bar'" in _collapse_curl(raw)

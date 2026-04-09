@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import asdict, dataclass
 
@@ -60,6 +62,7 @@ class Tweet:
     replies: int = 0
     views: int = 0
     is_update: bool = False
+    quoted_tweet: Tweet | None = None
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict safe for JSON."""
