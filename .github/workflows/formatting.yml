@@ -1,12 +1,14 @@
 name: Run Ruff formatter
 
-on: push
+on:
+    push:
+        branches: [main]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v3
-        with:
-            src: "./src"
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: astral-sh/ruff-action@v3
+              with:
+                  src: "./src"
