@@ -61,10 +61,26 @@ async def main():
     async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
     ) as xc:
-        async for t in xc.stream(interval_s=5.0):
+        async for t in xc.stream():
             print(t.to_markdown())
 
 asyncio.run(main())
+```
+
+By default, `stream()` now polls every ~30 seconds with built-in jitter (fuzzy interval) so requests do not follow an identical cadence.
+
+```python
+# 30s base with +-20% jitter (default)
+async for t in xc.stream():
+    process(t)
+
+# Custom base interval and jitter
+async for t in xc.stream(interval_s=45.0, jitter_ratio=0.15):
+    process(t)
+
+# Disable jitter if you need a fixed cadence
+async for t in xc.stream(interval_s=30.0, jitter_ratio=0.0):
+    process(t)
 ```
 
 ### Fetch modes

@@ -5,6 +5,7 @@ Key structure change vs legacy: user identity fields moved out of result.legacy
 into result.core (name, screen_name) and result.avatar (image_url).
 """
 
+import inspect
 from unittest.mock import patch
 
 import pytest
@@ -639,6 +640,38 @@ class TestUpdateTracking:
 
         assert {t.id for t in results} == {1002}
         assert client._last_tweet_id == 1002
+
+
+# ---------------------------------------------------------------------------
+# Stream interval safety
+# ---------------------------------------------------------------------------
+
+
+class TestStreamIntervalSafety:
+    def test_stream_default_interval_is_30_seconds(self):
+        param = inspect.signature(XTimelineClient.stream).parameters["interval_s"]
+        assert param.default == 30.0
+
+    def test_jitter_bounds_are_applied(self, client):
+        with patch("xclient.random.uniform", return_value=30.5) as mock_uniform:
+            delay = client._compute_sleep_interval(30.0, 0.20)
+
+        low, high = mock_uniform.call_args.args
+        assert low == pytest.approx(24.0)
+        assert high == pytest.approx(36.0)
+        assert delay == 30.5
+
+    def test_zero_jitter_uses_constant_interval(self, client):
+        with patch("xclient.random.uniform", return_value=30.0) as mock_uniform:
+            delay = client._compute_sleep_interval(30.0, 0.0)
+
+        low, high = mock_uniform.call_args.args
+        assert low == pytest.approx(30.0)
+        assert high == pytest.approx(30.0)
+        assert delay == 30.0
+
+    def test_negative_interval_is_clamped_to_zero(self, client):
+        assert client._compute_sleep_interval(-5.0, 0.20) == 0.0
 
 
 # ---------------------------------------------------------------------------

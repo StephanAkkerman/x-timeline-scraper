@@ -3,6 +3,7 @@ import datetime as dt
 import json
 import logging
 import os
+import random
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -750,7 +751,10 @@ class XTimelineClient:
         return out
 
     async def stream(
-        self, interval_s: float = 5.0, mode: FetchMode = "new_only"
+        self,
+        interval_s: float = 30.0,
+        mode: FetchMode = "new_only",
+        jitter_ratio: float = 0.20,
     ) -> AsyncIterator[Tweet]:
         """
         Async generator that yields tweets forever.
@@ -758,9 +762,13 @@ class XTimelineClient:
         Parameters
         ----------
         interval_s : float
-            Polling interval in seconds.
+            Base polling interval in seconds. Defaults to 30.0.
         mode : FetchMode
             Same options as :meth:`fetch_tweets`. Defaults to ``"new_only"``.
+        jitter_ratio : float
+            Fractional randomization around ``interval_s`` to avoid fixed polling
+            cadence. For example, ``0.20`` means each delay is randomly sampled
+            between 80% and 120% of ``interval_s``. Set to ``0`` to disable.
 
         Yields
         ------
@@ -773,7 +781,18 @@ class XTimelineClient:
                     yield tw
             except Exception as e:
                 logger.error("stream() iteration error: %s", e)
-            await asyncio.sleep(interval_s)
+            await asyncio.sleep(self._compute_sleep_interval(interval_s, jitter_ratio))
+
+    @staticmethod
+    def _compute_sleep_interval(interval_s: float, jitter_ratio: float) -> float:
+        """Return randomized sleep seconds around a base interval."""
+        base = max(float(interval_s), 0.0)
+        jitter = max(float(jitter_ratio), 0.0)
+        if base == 0.0:
+            return 0.0
+        low = base * max(0.0, 1.0 - jitter)
+        high = base * (1.0 + jitter)
+        return random.uniform(low, high)
 
 
 async def _example_once():
@@ -789,7 +808,7 @@ async def _example_stream():
     async with XTimelineClient(
         "curl.txt", persist_last_id_path="state/last_id.txt"
     ) as xc:
-        async for tweet in xc.stream(interval_s=5.0):
+        async for tweet in xc.stream():
             print(tweet.id, tweet.text)
 
 
