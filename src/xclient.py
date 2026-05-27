@@ -8,6 +8,7 @@ import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Iterable, Literal
+
 import aiohttp
 import uncurl
 
@@ -472,7 +473,9 @@ class XTimelineClient:
         result = tweet.get("core", {}).get("user_results", {}).get("result", {})
         # New API shape: name/screen_name live in result.core; image in result.avatar
         if key in ("name", "screen_name", "created_at"):
-            value = result.get("core", {}).get(key, "")
+            value = result.get("legacy", {}).get(key, "") or result.get("core", {}).get(
+                key, ""
+            )
         elif key == "profile_image_url_https":
             value = result.get("avatar", {}).get("image_url", "")
         else:
