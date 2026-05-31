@@ -477,7 +477,10 @@ class XTimelineClient:
                 key, ""
             )
         elif key == "profile_image_url_https":
-            value = result.get("avatar", {}).get("image_url", "")
+            value = result.get("legacy", {}).get(key, "") or result.get(
+                "avatar", {}
+            ).get("image_url", "")
+
         else:
             value = result.get("legacy", {}).get(key, "")
         return value
