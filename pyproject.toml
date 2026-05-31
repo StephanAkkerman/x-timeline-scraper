@@ -1,6 +1,7 @@
 [project]
 name = "xtimeline"
-version = "0.1.5"
+# Note: also bump it in src/__init__.py
+version = "0.1.6"
 description = "Lightweight X/Twitter timeline client (GraphQL via cURL or auth strategies)"
 readme = "README.md"
 requires-python = ">=3.11"
