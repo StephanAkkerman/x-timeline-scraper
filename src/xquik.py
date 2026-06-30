@@ -43,16 +43,31 @@ def _as_int(value: Any) -> int:
         return int(value)
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        return int(value)
     if isinstance(value, str):
+        stripped = value.strip()
         try:
-            return int(value.strip())
+            return int(stripped)
         except ValueError:
-            return 0
+            try:
+                return int(float(stripped))
+            except ValueError:
+                return 0
     return 0
 
 
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def tweet_from_xquik(raw: Mapping[str, Any]) -> Tweet | None:
-    tweet_id = _as_int(raw.get("id") or raw.get("tweet_id") or raw.get("rest_id"))
+    tweet_id = _as_int(
+        _first_not_none(raw.get("id"), raw.get("tweet_id"), raw.get("rest_id"))
+    )
     if tweet_id <= 0:
         return None
 
@@ -82,10 +97,10 @@ def tweet_from_xquik(raw: Mapping[str, Any]) -> Tweet | None:
         title=f"{display_name} tweeted",
         media_types=[],
         created_at=str(raw.get("createdAt") or raw.get("created_at") or ""),
-        likes=_as_int(raw.get("likeCount") or raw.get("likes")),
-        retweets=_as_int(raw.get("retweetCount") or raw.get("retweets")),
-        replies=_as_int(raw.get("replyCount") or raw.get("replies")),
-        views=_as_int(raw.get("viewCount") or raw.get("views")),
+        likes=_as_int(_first_not_none(raw.get("likeCount"), raw.get("likes"))),
+        retweets=_as_int(_first_not_none(raw.get("retweetCount"), raw.get("retweets"))),
+        replies=_as_int(_first_not_none(raw.get("replyCount"), raw.get("replies"))),
+        views=_as_int(_first_not_none(raw.get("viewCount"), raw.get("views"))),
     )
 
 

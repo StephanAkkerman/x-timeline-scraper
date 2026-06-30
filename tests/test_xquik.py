@@ -67,6 +67,30 @@ def test_tweet_from_xquik_maps_known_fields():
     assert tweet.views == 10
 
 
+def test_tweet_from_xquik_preserves_zero_metric_values():
+    tweet = tweet_from_xquik(
+        {
+            "id": "2039000000000000002",
+            "text": "zero metrics",
+            "likeCount": 0,
+            "likes": 9,
+            "retweetCount": "0.0",
+            "retweets": 8,
+            "replyCount": 0.0,
+            "replies": 7,
+            "viewCount": "0",
+            "views": 6,
+            "author": {"username": "xquik", "name": "Xquik"},
+        }
+    )
+
+    assert tweet is not None
+    assert tweet.likes == 0
+    assert tweet.retweets == 0
+    assert tweet.replies == 0
+    assert tweet.views == 0
+
+
 def test_search_xquik_uses_injected_opener():
     captured = {}
 
