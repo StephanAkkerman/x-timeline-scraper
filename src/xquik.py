@@ -32,7 +32,7 @@ def build_xquik_request(url: str, api_key: str) -> Request:
         url,
         headers={
             "Accept": "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "X-API-Key": api_key,
         },
         method="GET",
     )
@@ -123,7 +123,7 @@ def search_xquik(
     with opener(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, Mapping):
-        raise ValueError("Xquik search response must be a JSON object")
+        raise TypeError("Xquik search response must be a JSON object")
 
     raw_tweets = payload.get("tweets") or payload.get("data") or []
     if not isinstance(raw_tweets, list):

@@ -34,11 +34,12 @@ def test_build_xquik_search_url_includes_source_truth_params():
     )
 
 
-def test_build_xquik_request_uses_bearer_header():
+def test_build_xquik_request_uses_api_key_header():
     request = build_xquik_request("https://example.test/search", "test-key")
 
     assert isinstance(request, Request)
-    assert request.headers["Authorization"] == "Bearer test-key"
+    assert request.headers["X-api-key"] == "test-key"
+    assert "Authorization" not in request.headers
     assert request.headers["Accept"] == "application/json"
 
 
@@ -96,7 +97,7 @@ def test_search_xquik_uses_injected_opener():
 
     def fake_opener(request, *, timeout):
         captured["url"] = request.full_url
-        captured["authorization"] = request.headers["Authorization"]
+        captured["api_key"] = request.headers["X-api-key"]
         captured["timeout"] = timeout
         return FakeResponse({"tweets": [{"id": "1", "text": "one"}]})
 
@@ -106,7 +107,7 @@ def test_search_xquik_uses_injected_opener():
     assert tweets[0].id == 1
     assert captured == {
         "url": "https://xquik.com/api/v1/x/tweets/search?q=mcp&queryType=Latest",
-        "authorization": "Bearer test-key",
+        "api_key": "test-key",
         "timeout": 30,
     }
 
@@ -115,5 +116,5 @@ def test_search_xquik_rejects_non_object_response():
     def fake_opener(_request, *, timeout):
         return FakeResponse(["not-object"])
 
-    with pytest.raises(ValueError, match="JSON object"):
+    with pytest.raises(TypeError, match="JSON object"):
         search_xquik("mcp", api_key="test-key", opener=fake_opener)
