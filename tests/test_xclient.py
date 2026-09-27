@@ -11,6 +11,10 @@ from unittest.mock import patch
 import pytest
 
 from xclient import (
+    DEFAULT_FEATURES,
+    DEFAULT_QUERY_ID,
+    DEFAULT_VARIABLES,
+    WEB_BEARER_TOKEN,
     XTimelineClient,
     _collapse_curl,
     _extract_cookies_from_curl,
@@ -259,7 +263,10 @@ class TestPlainTweet:
 
     def test_user_img(self, client):
         t = _parse(client, PLAIN_TWEET)
-        assert t.user_img == "https://pbs.twimg.com/profile_images/test_news_bot_normal.jpg"
+        assert (
+            t.user_img
+            == "https://pbs.twimg.com/profile_images/test_news_bot_normal.jpg"
+        )
 
     def test_title(self, client):
         t = _parse(client, PLAIN_TWEET)
@@ -979,3 +986,50 @@ class TestCookieParsing:
         raw = "curl 'url' \\\n  -H 'Foo: bar'"
         assert "\\\n" not in _collapse_curl(raw)
         assert "-H 'Foo: bar'" in _collapse_curl(raw)
+
+
+# ---------------------------------------------------------------------------
+# Cookie-based auth
+# ---------------------------------------------------------------------------
+
+
+def test_from_cookies_builds_following_timeline_request():
+    client = XTimelineClient.from_cookies(" tok ", "csrf")
+    req = client._req
+    assert client.curl_path is None
+    assert req["method"] == "POST"
+    assert req["url"].endswith(f"/{DEFAULT_QUERY_ID}/HomeLatestTimeline")
+    assert req["cookies"] == {"auth_token": "tok", "ct0": "csrf"}
+    assert req["headers"]["x-csrf-token"] == "csrf"
+    assert req["headers"]["authorization"] == f"Bearer {WEB_BEARER_TOKEN}"
+    assert req["json"]["queryId"] == DEFAULT_QUERY_ID
+    assert req["json"]["features"] == DEFAULT_FEATURES
+
+
+def test_from_cookies_query_id_override():
+    client = XTimelineClient.from_cookies("tok", "csrf", query_id="abc123")
+    assert "/abc123/HomeLatestTimeline" in client._req["url"]
+    assert client._req["json"]["queryId"] == "abc123"
+
+
+def test_from_cookies_does_not_share_mutable_defaults():
+    a = XTimelineClient.from_cookies("tok", "csrf")
+    a._req["json"]["variables"]["count"] = 99
+    b = XTimelineClient.from_cookies("tok", "csrf")
+    assert b._req["json"]["variables"]["count"] == DEFAULT_VARIABLES["count"]
+
+
+@pytest.mark.parametrize("auth_token,ct0", [("", "csrf"), ("tok", ""), ("", "")])
+def test_from_cookies_requires_both_cookies(auth_token, ct0):
+    with pytest.raises(ValueError):
+        XTimelineClient.from_cookies(auth_token, ct0)
+
+
+def test_from_cookies_passes_constructor_kwargs(tmp_path):
+    last_id = tmp_path / "last_id.txt"
+    last_id.write_text("42")
+    client = XTimelineClient.from_cookies(
+        "tok", "csrf", persist_last_id_path=str(last_id)
+    )
+    assert client._last_tweet_id == 42
+    assert client.last_status is None
