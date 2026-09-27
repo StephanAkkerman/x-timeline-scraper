@@ -35,7 +35,41 @@ pip install xtimeline
 
 ## Usage ⌨️
 
-To use the X-Timeline Scraper, you need to provide a cURL command that accesses the desired X timeline. The instructions can be found in [curl_example.txt](curl_example.txt). Then, you can use the `XTimelineClient` class to fetch and parse tweets.
+The client polls your **Following** timeline as your own logged-in X session. It needs two
+cookies from that session:
+
+1. Log into [x.com](https://x.com) in your browser.
+2. Open DevTools (F12) → **Application** (Chrome/Edge) or **Storage** (Firefox) → **Cookies** →
+   `https://x.com`.
+3. Copy the values of `auth_token` and `ct0`.
+
+Treat these like a password: they grant full access to your account. They stay valid until you
+log out of that browser session; `client.last_status` becomes `401`/`403` once they expire.
+
+```python
+import asyncio
+import os
+from xclient import XTimelineClient
+
+async def main():
+    async with XTimelineClient.from_cookies(
+        os.environ["X_AUTH_TOKEN"], os.environ["X_CT0"]
+    ) as xc:
+        for t in await xc.fetch_tweets():
+            print(t.to_markdown())
+
+asyncio.run(main())
+```
+
+If X rotates the timeline's GraphQL query id before a new release ships, pass the current one
+(from the `HomeLatestTimeline` request URL in DevTools → Network) via
+`from_cookies(..., query_id="...")`.
+
+### Alternative: a captured cURL command
+
+Instead of cookies you can pass a full captured request, which also picks up any header or
+feature flag changes X makes. The capture steps are in [curl_example.txt](curl_example.txt); the
+examples below use this form.
 
 ### Fetching tweets once
 

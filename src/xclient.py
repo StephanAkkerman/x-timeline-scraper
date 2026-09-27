@@ -161,33 +161,191 @@ def expand_tco_urls(text: str, url_entities: list[dict]) -> str:
     return text
 
 
-class XTimelineClient:
+# Public bearer token baked into X's own web client. It is identical for every
+# user; the per-user secrets are the ``auth_token`` and ``ct0`` cookies.
+WEB_BEARER_TOKEN = (
+    "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
+    "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+)
+# GraphQL query id of the "Following" (HomeLatestTimeline) timeline. X rotates
+# this occasionally; override it via ``from_cookies(query_id=...)`` when it does.
+DEFAULT_QUERY_ID = "2ee46L1AFXmnTa0EvUog-Q"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
+DEFAULT_VARIABLES: dict[str, Any] = {
+    "count": 20,
+    "includePromotedContent": False,
+    "latestControlAvailable": True,
+    "requestContext": "launch",
+}
+DEFAULT_FEATURES: dict[str, bool] = {
+    "rweb_video_screen_enabled": False,
+    "profile_label_improvements_pcf_label_in_post_enabled": True,
+    "responsive_web_profile_redirect_enabled": False,
+    "rweb_tipjar_consumption_enabled": False,
+    "verified_phone_label_enabled": False,
+    "creator_subscriptions_tweet_preview_api_enabled": True,
+    "responsive_web_graphql_timeline_navigation_enabled": True,
+    "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+    "premium_content_api_read_enabled": False,
+    "communities_web_enable_tweet_community_results_fetch": True,
+    "c9s_tweet_anatomy_moderator_badge_enabled": True,
+    "responsive_web_grok_analyze_button_fetch_trends_enabled": False,
+    "responsive_web_grok_analyze_post_followups_enabled": True,
+    "responsive_web_jetfuel_frame": True,
+    "responsive_web_grok_share_attachment_enabled": True,
+    "responsive_web_grok_annotations_enabled": True,
+    "articles_preview_enabled": True,
+    "responsive_web_edit_tweet_api_enabled": True,
+    "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+    "view_counts_everywhere_api_enabled": True,
+    "longform_notetweets_consumption_enabled": True,
+    "responsive_web_twitter_article_tweet_consumption_enabled": True,
+    "content_disclosure_indicator_enabled": True,
+    "content_disclosure_ai_generated_indicator_enabled": True,
+    "responsive_web_grok_show_grok_translated_post": True,
+    "responsive_web_grok_analysis_button_from_backend": True,
+    "post_ctas_fetch_enabled": True,
+    "freedom_of_speech_not_reach_fetch_enabled": True,
+    "standardized_nudges_misinfo": True,
+    "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": True,
+    "longform_notetweets_rich_text_read_enabled": True,
+    "longform_notetweets_inline_media_enabled": False,
+    "responsive_web_grok_image_annotation_enabled": True,
+    "responsive_web_grok_imagine_annotation_enabled": True,
+    "responsive_web_grok_community_note_auto_translation_is_enabled": True,
+    "responsive_web_enhance_cards_enabled": False,
+}
+
+
+def build_cookie_request(
+    auth_token: str,
+    ct0: str,
+    *,
+    query_id: str = DEFAULT_QUERY_ID,
+    user_agent: str = DEFAULT_USER_AGENT,
+) -> dict[str, Any]:
     """
-    Minimal client for polling an X/Twitter timeline endpoint described by a cURL.
+    Build the Following-timeline request from the two session cookies.
 
     Parameters
     ----------
-    curl_path : str
-        Path to a text file containing a single cURL command.
+    auth_token : str
+        Value of the ``auth_token`` cookie of a logged-in x.com session.
+    ct0 : str
+        Value of the ``ct0`` cookie; also sent as the CSRF header.
+    query_id : str
+        GraphQL query id of ``HomeLatestTimeline``.
+    user_agent : str
+        User-Agent header to send.
+
+    Returns
+    -------
+    dict[str, Any]
+        Request description in the same shape ``_load_curl`` produces.
+    """
+    return {
+        "url": f"https://x.com/i/api/graphql/{query_id}/HomeLatestTimeline",
+        "method": "POST",
+        "headers": {
+            "authorization": f"Bearer {WEB_BEARER_TOKEN}",
+            "x-csrf-token": ct0,
+            "x-twitter-auth-type": "OAuth2Session",
+            "x-twitter-active-user": "yes",
+            "x-twitter-client-language": "en",
+            "content-type": "application/json",
+            "user-agent": user_agent,
+            "referer": "https://x.com/home",
+            "origin": "https://x.com",
+        },
+        "cookies": {"auth_token": auth_token, "ct0": ct0},
+        "json": {
+            "variables": dict(DEFAULT_VARIABLES),
+            "features": dict(DEFAULT_FEATURES),
+            "queryId": query_id,
+        },
+    }
+
+
+class XTimelineClient:
+    """
+    Minimal client for polling the X/Twitter Following timeline.
+
+    Authenticate either with a captured cURL file (the default constructor) or
+    with just the two session cookies via :meth:`from_cookies`.
+
+    Parameters
+    ----------
+    curl_path : str | None
+        Path to a text file containing a single cURL command. ``None`` skips
+        loading one; :meth:`from_cookies` uses this.
     timeout_s : float
         Per-request timeout in seconds.
     persist_last_id_path : str | None
         Optional path to persist last seen tweet id between runs.
     """
 
+    @classmethod
+    def from_cookies(
+        cls,
+        auth_token: str,
+        ct0: str,
+        *,
+        query_id: str | None = None,
+        user_agent: str | None = None,
+        **kwargs: Any,
+    ) -> "XTimelineClient":
+        """
+        Create a client from the ``auth_token`` and ``ct0`` session cookies.
+
+        Parameters
+        ----------
+        auth_token : str
+            Value of the ``auth_token`` cookie of a logged-in x.com session.
+        ct0 : str
+            Value of the ``ct0`` cookie.
+        query_id : str | None
+            Override for the ``HomeLatestTimeline`` GraphQL query id, for when
+            X rotates it before this package is updated.
+        user_agent : str | None
+            Override for the User-Agent header.
+        **kwargs
+            Passed through to the constructor (e.g. ``persist_last_id_path``).
+
+        Returns
+        -------
+        XTimelineClient
+            Client ready to fetch or stream.
+        """
+        if not auth_token or not ct0:
+            raise ValueError("both auth_token and ct0 are required")
+        client = cls(curl_path=None, **kwargs)
+        client._req = build_cookie_request(
+            auth_token.strip(),
+            ct0.strip(),
+            query_id=query_id or DEFAULT_QUERY_ID,
+            user_agent=user_agent or DEFAULT_USER_AGENT,
+        )
+        return client
+
     def __init__(
         self,
-        curl_path: str = "curl.txt",
+        curl_path: str | None = "curl.txt",
         timeout_s: float = 30.0,
         persist_last_id_path: str | None = None,
         debug_http: bool | None = None,
     ) -> None:
-        self.curl_path = Path(curl_path)
+        self.curl_path = Path(curl_path) if curl_path is not None else None
         self.timeout_s = timeout_s
         self._session: aiohttp.ClientSession | None = None
         self._req: dict[str, Any] = {}
         self._last_tweet_id: int = 0
         self._seen_ids: set[int] = set()
+        # HTTP status of the most recent timeline request (None before the first
+        # one). 401/403 means the session cookies expired and must be recaptured.
+        self.last_status: int | None = None
         self.debug_http = (
             (os.getenv("XCLIENT_DEBUG_HTTP", "").lower() in {"1", "true", "yes"})
             if debug_http is None
@@ -196,7 +354,8 @@ class XTimelineClient:
         self.persist_last_id_path = (
             Path(persist_last_id_path) if persist_last_id_path else None
         )
-        self._load_curl()
+        if self.curl_path is not None:
+            self._load_curl()
         self._load_last_id()
 
     # ---------- lifecycle ----------
@@ -381,6 +540,7 @@ class XTimelineClient:
 
         try:
             async with self._session.request(method, url, json=json_payload) as resp:
+                self.last_status = resp.status
                 if resp.status >= 400:
                     body = await resp.text()
                     resp_headers = {k: v for k, v in resp.headers.items()}
