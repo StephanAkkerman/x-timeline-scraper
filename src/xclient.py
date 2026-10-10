@@ -683,6 +683,42 @@ class XTimelineClient:
     def _tweet_url(self, tweet_id: int) -> str:
         return f"https://twitter.com/user/status/{tweet_id}"
 
+    @staticmethod
+    def _edit_tweet_ids(tw: dict) -> list[int]:
+        """
+        Read the ids of every version of an edited post from ``edit_control``.
+
+        The original post carries ``edit_tweet_ids`` directly; an edited version
+        nests them under ``edit_control_initial`` next to ``initial_tweet_id``.
+
+        Parameters
+        ----------
+        tw : dict
+            GraphQL 'Tweet' node (already normalized).
+
+        Returns
+        -------
+        list[int]
+            Version ids, oldest first. Empty if the post was never edited.
+        """
+        edit_control = tw.get("edit_control")
+        if not isinstance(edit_control, dict):
+            return []
+
+        initial = edit_control.get("edit_control_initial")
+        source = initial if isinstance(initial, dict) else edit_control
+        raw_ids = list(source.get("edit_tweet_ids") or [])
+        if edit_control.get("initial_tweet_id") is not None:
+            raw_ids.append(edit_control["initial_tweet_id"])
+
+        ids: set[int] = set()
+        for raw in raw_ids:
+            try:
+                ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+        return sorted(ids) if len(ids) > 1 else []
+
     def _parse_single_tweet(self, tw: dict) -> Tweet | None:
         """
         Parse a normalized Tweet GraphQL node into a Tweet object.
@@ -758,6 +794,10 @@ class XTimelineClient:
 
         # subscriber-only (creator subscription / Super Follow)
         is_subscriber_only = bool(tw.get("exclusivityInfo"))
+
+        # edit history: each edit of a post gets a new id
+        edit_tweet_ids = self._edit_tweet_ids(tw)
+        is_edit = bool(edit_tweet_ids) and tid != edit_tweet_ids[0]
 
         # reply/quote/retweet handling (best-effort)
         title = f"{user_name} tweeted"
@@ -836,6 +876,8 @@ class XTimelineClient:
             replies=replies,
             views=views,
             is_subscriber_only=is_subscriber_only,
+            edit_tweet_ids=edit_tweet_ids,
+            is_edit=is_edit,
             quoted_tweet=quoted_tweet,
         )
 

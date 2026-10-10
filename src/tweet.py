@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 logger = logging.getLogger(__file__)
 
@@ -43,6 +43,12 @@ class Tweet:
         A short human-readable title (“X retweeted Y”, etc.).
     media_types : list[str]
         Mirrors the attachment types for convenience.
+    edit_tweet_ids : list[int]
+        Ids of every version of an edited post, oldest first (X gives each edit
+        a new id). Empty when the post was never edited.
+    is_edit : bool
+        True when this tweet is a later, edited version of an earlier post;
+        ``edit_tweet_ids[0]`` is the original's id.
     """
 
     id: int
@@ -63,6 +69,8 @@ class Tweet:
     views: int = 0
     is_update: bool = False
     is_subscriber_only: bool = False
+    edit_tweet_ids: list[int] = field(default_factory=list)
+    is_edit: bool = False
     quoted_tweet: Tweet | None = None
 
     def to_dict(self) -> dict:
