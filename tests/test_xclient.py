@@ -650,6 +650,72 @@ class TestUpdateTracking:
 
 
 # ---------------------------------------------------------------------------
+# Edited posts
+# ---------------------------------------------------------------------------
+
+
+class TestEditedPosts:
+    def test_unedited_tweet_has_no_edit_history(self, client):
+        tw = _tw("2000")
+        tw["edit_control"] = {"edit_tweet_ids": ["2000"], "edits_remaining": "5"}
+        t = _parse(client, tw)
+        assert t.edit_tweet_ids == []
+        assert t.is_edit is False
+
+    def test_missing_edit_control_has_no_edit_history(self, client):
+        t = _parse(client, _tw("2000"))
+        assert t.edit_tweet_ids == []
+        assert t.is_edit is False
+
+    def test_original_of_edited_post(self, client):
+        tw = _tw("2000")
+        tw["edit_control"] = {"edit_tweet_ids": ["2000", "2005"]}
+        t = _parse(client, tw)
+        assert t.edit_tweet_ids == [2000, 2005]
+        assert t.is_edit is False
+
+    def test_edited_version_links_to_original(self, client):
+        tw = _tw("2005")
+        tw["edit_control"] = {
+            "initial_tweet_id": "2000",
+            "edit_control_initial": {"edit_tweet_ids": ["2000", "2005"]},
+        }
+        t = _parse(client, tw)
+        assert t.edit_tweet_ids == [2000, 2005]
+        assert t.is_edit is True
+
+    def test_edit_fields_in_to_dict(self, client):
+        tw = _tw("2005")
+        tw["edit_control"] = {
+            "initial_tweet_id": "2000",
+            "edit_control_initial": {"edit_tweet_ids": ["2000", "2005"]},
+        }
+        d = _parse(client, tw).to_dict()
+        assert d["edit_tweet_ids"] == [2000, 2005]
+        assert d["is_edit"] is True
+
+    def test_edited_version_is_new_not_update_in_with_updates_mode(self, client):
+        import asyncio
+
+        original = _tw("2000")
+        original["edit_control"] = {"edit_tweet_ids": ["2000"]}
+        with patch.object(client, "fetch_raw", return_value=_make_payload(original)):
+            asyncio.run(client.fetch_tweets(mode="with_updates"))
+
+        edited = _tw("2005")
+        edited["edit_control"] = {
+            "initial_tweet_id": "2000",
+            "edit_control_initial": {"edit_tweet_ids": ["2000", "2005"]},
+        }
+        with patch.object(client, "fetch_raw", return_value=_make_payload(edited)):
+            results = asyncio.run(client.fetch_tweets(mode="with_updates"))
+
+        assert [(t.id, t.is_update, t.is_edit) for t in results] == [
+            (2005, False, True)
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Stream interval safety
 # ---------------------------------------------------------------------------
 

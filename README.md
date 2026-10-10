@@ -148,6 +148,16 @@ async for t in xc.stream(mode="with_updates"):
         insert_new_tweet(t)
 ```
 
+X gives every edit of a post a new id, so an edited post arrives as a new tweet
+(`is_update=False`). Check `is_edit` to replace the earlier version instead of
+storing it twice:
+
+```python
+async for t in xc.stream(mode="with_updates"):
+    if t.is_edit:
+        replace_stored_version(t, version_ids=t.edit_tweet_ids)
+```
+
 ### Tweet fields
 
 Each `Tweet` object contains:
@@ -170,6 +180,8 @@ Each `Tweet` object contains:
 | `hashtags` | `list[str]` | Uppercased hashtags |
 | `title` | `str` | Human-readable summary, e.g. `"TraderSZ retweeted Jelle"` |
 | `is_update` | `bool` | `True` if this tweet was seen in a previous fetch this session |
+| `edit_tweet_ids` | `list[int]` | Ids of every version of an edited post, oldest first; empty if never edited |
+| `is_edit` | `bool` | `True` if this tweet is an edited version of an earlier post (`edit_tweet_ids[0]` is the original) |
 
 ## Citation ✍️
 <!-- Be sure to adjust everything here so it matches your name and repo -->
